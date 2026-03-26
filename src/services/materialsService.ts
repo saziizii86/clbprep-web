@@ -128,15 +128,22 @@ const processUploadedFiles = async (uploadedFilesStr: string): Promise<string> =
 // Get all materials
 // Get all materials - NOW INDEXED & FILTERED (instant load)
 export const getMaterials = async (): Promise<Material[]> => {
-  // ✅ Return cached version if available (saves ~30-50 reads per session)
   const CACHE_KEY = "clbprep_materials";
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  // ✅ Check localStorage cache first
   try {
-    const cached = sessionStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
-      console.log("📦 Materials loaded from cache");
-      return JSON.parse(cached);
+      const { data, savedAt } = JSON.parse(cached);
+      const isExpired = Date.now() - savedAt > CACHE_TTL_MS;
+      if (!isExpired) {
+        console.log("📦 Materials loaded from localStorage cache");
+        return data;
+      }
+      console.log("🕐 Materials cache expired, re-fetching...");
     }
-  } catch { /* ignore parse errors */ }
+  } catch { /* ignore */ }
 
   try {
     const response = await databases.listDocuments(
@@ -153,12 +160,15 @@ export const getMaterials = async (): Promise<Material[]> => {
       ]
     );
 
-    console.log(`📡 Fetched ${response.documents.length} materials (lightweight, no uploadedFiles)`);
-    
-    // ✅ Save to cache for this session
+    console.log(`📡 Fetched ${response.documents.length} materials`);
+
+    // ✅ Save to localStorage with timestamp
     try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify(response.documents));
-    } catch { /* ignore storage errors */ }
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        data: response.documents,
+        savedAt: Date.now()
+      }));
+    } catch { /* ignore storage full errors */ }
 
     return response.documents as unknown as Material[];
   } catch (error) {
@@ -180,6 +190,7 @@ export const getMaterialById = async (id: string): Promise<Material | null> => {
 
 // Create new material - with automatic file storage handling
 export const createMaterial = async (material: Omit<Material, "$id">): Promise<Material | null> => {
+	localStorage.removeItem("clbprep_materials"); // ✅ ADD
   try {
     // Process uploadedFiles - upload large files to storage if needed
     let processedMaterial = { ...material };
@@ -220,6 +231,7 @@ export const createMaterial = async (material: Omit<Material, "$id">): Promise<M
 
 // Update material - with automatic file storage handling
 export const updateMaterial = async (id: string, material: Partial<Material>): Promise<Material | null> => {
+	localStorage.removeItem("clbprep_materials"); // ✅ ADD
   try {
     const { $id, $createdAt, $updatedAt, $permissions, $collectionId, $databaseId, ...updateData } = material as any;
     
@@ -259,6 +271,7 @@ export const updateMaterial = async (id: string, material: Partial<Material>): P
 
 // Delete material (and associated storage files)
 export const deleteMaterial = async (id: string): Promise<boolean> => {
+	localStorage.removeItem("clbprep_materials"); // ✅ ADD
   try {
     // Optional: Delete associated files from storage
     // You could fetch the material first, parse uploadedFiles, and delete storage files

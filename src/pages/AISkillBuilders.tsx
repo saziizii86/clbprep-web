@@ -3743,49 +3743,7 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
         </div>
       </div>
 
-      {/* My Practice History — full-width card always visible */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-900">My Practice History</h2>
-          {userId && (
-            <span className="text-sm text-gray-500">
-              {historyRecords.length > 0 ? `${historyRecords.length} session${historyRecords.length !== 1 ? "s" : ""} saved` : "No sessions yet"}
-            </span>
-          )}
-        </div>
-
-        <button
-          onClick={() => { setShowHistory(true); loadHistory(); }}
-          className="w-full group bg-white rounded-2xl border-2 border-indigo-200 p-5 text-left hover:shadow-lg hover:-translate-y-0.5 hover:border-indigo-400 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 shadow-sm">
-              <History className="w-7 h-7 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-gray-900 text-base">Review Past Sessions</h3>
-              <p className="text-sm text-gray-500 mt-0.5">
-                See every builder session you've completed — what topic, what angle, your score, and when you practiced.
-              </p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                {["What you practiced", "Topics & angles covered", "Scores & feedback", "Full session history"].map(tag => (
-                  <span key={tag} className="text-xs font-medium px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
-                    ✓ {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="shrink-0 flex flex-col items-center gap-1 text-indigo-600 group-hover:gap-2 transition-all">
-              {historyRecords.length > 0 && (
-                <span className="text-2xl font-black">{historyRecords.length}</span>
-              )}
-              <div className="flex items-center gap-1 text-xs font-semibold">
-                View History <ChevronRight className="w-4 h-4" />
-              </div>
-            </div>
-          </div>
-        </button>
-      </div>
+     
 
       {!isProMember && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -1,0 +1,90 @@
+// ============================================
+// EXACT CHANGES NEEDED IN userHome.tsx FOR VIEW POINTS
+// ============================================
+
+
+// ==========================================
+// CHANGE 1: Add import (after the other Listening imports)
+// ==========================================
+
+// Add this import with the other Listening test imports:
+import ListeningViewPointsTest from './Listening/6. View Points/ListeningViewPointsTest';
+
+
+// ==========================================
+// CHANGE 2: Update the practice test rendering block
+// ==========================================
+
+// Add this condition BEFORE the Discussion condition:
+// (The order should be: Daily Life Conversation -> Information -> News Item -> View Points -> Discussion -> default)
+
+: practiceTestData.taskName?.toLowerCase().includes("view") || practiceTestData.taskType === "task6" || practiceTestData.taskType === "part6" ? (
+  <ListeningViewPointsTest
+    scenario={practiceTestData}
+    onBack={() => {
+      setCurrentView("scenarios");
+      setPracticeTestData(null);
+    }}
+    onComplete={(results) => {
+      console.log("View Points completed:", results);
+      setCurrentView("scenarios");
+      setPracticeTestData(null);
+    }}
+  />
+)
+
+
+// ==========================================
+// FULL RENDERING BLOCK (for reference)
+// ==========================================
+
+<>
+  {practiceTestData.taskName === "Daily Life Conversation" ? (
+    <ListeningDailyLifeConversationTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("Daily Life Conversation completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  ) : practiceTestData.taskName?.toLowerCase().includes("information") ? (
+    <ListeningForInformationPracticeTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("Listening for Information completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  ) : practiceTestData.taskName?.toLowerCase().includes("news") || practiceTestData.taskType === "task4" || practiceTestData.taskType === "part4" ? (
+    <ListeningNewsItemTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("News Item completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  ) : practiceTestData.taskName?.toLowerCase().includes("view") || practiceTestData.taskType === "task6" || practiceTestData.taskType === "part6" ? (
+    <ListeningViewPointsTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("View Points completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  ) : practiceTestData.taskName === "Discussion" || practiceTestData.taskType === "task5" || practiceTestData.taskType === "part5" ? (
+    <ListeningDiscussionTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("Discussion completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  ) : (
+    <ListeningPracticeTest
+      scenario={practiceTestData}
+      onBack={() => { setCurrentView("scenarios"); setPracticeTestData(null); }}
+      onComplete={(results) => { console.log("Test completed:", results); setCurrentView("scenarios"); setPracticeTestData(null); }}
+    />
+  )}
+</>
+
+
+// ==========================================
+// SUMMARY
+// ==========================================
+// 
+// 1. Add import for ListeningViewPointsTest
+// 2. Add View Points condition in the rendering block (before Discussion)
+//
+// File location:
+//   src/pages/Listening/6. View Points/ListeningViewPointsTest.tsx

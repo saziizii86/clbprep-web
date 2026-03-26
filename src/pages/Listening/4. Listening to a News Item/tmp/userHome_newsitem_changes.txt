@@ -1,0 +1,112 @@
+// ============================================
+// EXACT CHANGES NEEDED IN userHome.tsx FOR NEWS ITEM
+// ============================================
+
+
+// ==========================================
+// CHANGE 1: Add import (after the ListeningDiscussionTest import)
+// ==========================================
+
+// FIND this line:
+import ListeningDiscussionTest from './Listening/5. Discussion/ListeningDiscussionTest';
+
+// ADD this line RIGHT AFTER it:
+import ListeningNewsItemTest from './Listening/4. Listening to a News Item/ListeningNewsItemTest';
+
+
+// ==========================================
+// CHANGE 2: Update the practice test rendering (around line 1345-1390)
+// ==========================================
+
+// FIND the block where you render the tests (the <> block with conditions)
+// It should look like this after adding Discussion:
+
+// REPLACE the ENTIRE block with this (adding News Item condition):
+
+<>
+  {practiceTestData.taskName === "Daily Life Conversation" ? (
+    <ListeningDailyLifeConversationTest
+      scenario={practiceTestData}
+      onBack={() => {
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+      onComplete={(results) => {
+        console.log("Daily Life Conversation completed:", results);
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+    />
+  ) : practiceTestData.taskName?.toLowerCase().includes("information") ? (
+    <ListeningForInformationPracticeTest
+      scenario={practiceTestData}
+      onBack={() => {
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+      onComplete={(results) => {
+        console.log("Listening for Information completed:", results);
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+    />
+  ) : practiceTestData.taskName?.toLowerCase().includes("news") || practiceTestData.taskType === "task4" || practiceTestData.taskType === "part4" ? (
+    // ✅ NEW: News Item Test with Dropdown Questions
+    <ListeningNewsItemTest
+      scenario={practiceTestData}
+      onBack={() => {
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+      onComplete={(results) => {
+        console.log("News Item completed:", results);
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+    />
+  ) : practiceTestData.taskName === "Discussion" || practiceTestData.taskType === "task5" || practiceTestData.taskType === "part5" ? (
+    <ListeningDiscussionTest
+      scenario={practiceTestData}
+      onBack={() => {
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+      onComplete={(results) => {
+        console.log("Discussion completed:", results);
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+    />
+  ) : (
+    <ListeningPracticeTest
+      scenario={practiceTestData}
+      onBack={() => {
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+      onComplete={(results) => {
+        console.log("Test completed:", results);
+        setCurrentView("scenarios");
+        setPracticeTestData(null);
+      }}
+    />
+  )}
+</>
+
+
+// ==========================================
+// SUMMARY
+// ==========================================
+// 
+// 1. Add import for ListeningNewsItemTest (after ListeningDiscussionTest import)
+// 2. Add News Item test condition in the rendering block
+//
+// Also create the folder and file:
+//   src/pages/Listening/4. Listening to a News Item/ListeningNewsItemTest.tsx
+//
+// The News Item test features:
+// - Audio player (same style as other tests)
+// - Dropdown questions format (all questions on one page)
+// - Progress tracking
+// - Timer
+// - Results with answer key

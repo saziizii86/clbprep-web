@@ -46,7 +46,7 @@ import FeedbackPage from "./feedback";
 
 import { account, databases, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
 import { Query } from "appwrite";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import React, { useState, useEffect } from 'react';
 import { 
   Award, Headphones, BookOpen, Edit, Mic, TrendingUp, 
@@ -68,6 +68,7 @@ import { Brain } from "lucide-react"; // Brain icon for sidebar
 
 export default function CelpipPracticeDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const location = useLocation();
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedSkill, setSelectedSkill] = useState(null);
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
@@ -265,6 +266,15 @@ useEffect(() => {
 
   loadMe();
 }, []);
+
+useEffect(() => {
+  const params = new URLSearchParams(location.search);
+  const skill = params.get("skill");
+  if (skill && ["listening", "reading", "writing", "speaking"].includes(skill)) {
+    setExpandedSkill(skill);
+    setActiveTab("practice");
+  }
+}, [location.search]);
 
 useEffect(() => {
 const loadSubscription = async () => {

@@ -525,14 +525,14 @@ function WhyChoose() {
     <section id="about" className="bg-gradient-to-b from-slate-50 to-indigo-50/60">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2 md:items-center">
         <div className="overflow-hidden rounded-[2rem] border bg-white shadow-sm">
-          <div className="aspect-[16/9] bg-slate-100">
-            <img
-              src={featureImg}
-              alt="CLBPrep features"
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </div>
+<div className="bg-slate-100">
+  <img
+    src={featureImg}
+    alt="CLBPrep features"
+    className="w-full object-contain"
+    loading="lazy"
+  />
+</div>
         </div>
 
         <div>

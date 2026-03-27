@@ -279,17 +279,9 @@ useEffect(() => {
 useEffect(() => {
 const loadSubscription = async () => {
   try {
-    // ✅ Use cached result for this session to avoid repeated DB reads
-    const cached = sessionStorage.getItem("clbprep_sub");
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      setUserRowId(parsed.rowId);
-      setSubscription(parsed.subscription);
-      return;
-    }
-
     const me = await account.get();
     const email = (me.email || "").trim().toLowerCase();
+
     const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
       Query.equal("email", email),
     ]);
@@ -327,24 +319,7 @@ let parsedHistory = [];
         transactionHistory: parsedHistory,
       });
 	  
-	    // ✅ ADD THESE LINES ↓
-      sessionStorage.setItem("clbprep_sub", JSON.stringify({
-        rowId: userDoc.$id,
-        subscription: {
-          plan: userDoc.subscriptionPlan || "basic",
-          status: userDoc.subscriptionStatus || "inactive",
-          paidAt: userDoc.subscriptionPaidAt || null,
-          startAt: userDoc.subscriptionStartAt || null,
-          endAt: userDoc.subscriptionEndAt || null,
-          sessionId: userDoc.stripeCheckoutSessionId || null,
-          customerId: userDoc.stripeCustomerId || null,
-          subscriptionId: userDoc.stripeSubscriptionId || null,
-          amountPaid: userDoc.amountPaid || 0,
-          paymentLast4: userDoc.paymentLast4 || null,
-          paymentBrand: userDoc.paymentBrand || null,
-          transactionHistory: parsedHistory,
-        }
-      }));
+
       // ✅ END OF ADDED LINES ↑
 	  
     } catch (error) {
@@ -1736,7 +1711,7 @@ const handleFeedback = () => {
 };
 
 const handleLogout = async () => {
-  sessionStorage.removeItem("clbprep_sub");   // ✅ ADD THIS LINE
+  sessionStorage.clear();
   const nowIso = new Date().toISOString();
 
   try {

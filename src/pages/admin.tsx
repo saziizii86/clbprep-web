@@ -560,24 +560,41 @@ const formattedMaterials = data.map((doc: any) => {
   loadMaterials();
 }, []);
 
-  const loadStudents = async () => {
-    setStudentsLoading(true);
+// REPLACE lines 563-579 with this:
+const loadStudents = async () => {
+  setStudentsLoading(true);
+  try {
+    const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+      Query.limit(500),
+      Query.orderDesc("$createdAt"),
+    ]);
 
-    try {
-      const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
-        Query.limit(500),
-        Query.orderDesc("$createdAt"),
-      ]);
+    setStudents(res.documents);
+  } catch (error) {
+    console.error("Failed to load students:", error);
+    setStudents([]);
+  } finally {
+    setStudentsLoading(false);
+  }
+};
+// ADD THIS ENTIRE BLOCK after line 579
+const syncAuthUsers = async () => {
+  if (!confirm("Sync Appwrite Auth users missing from the database?")) return;
+  setStudentsLoading(true);
+  try {
+    // For each student already in DB, collect known IDs
+    const knownIds = new Set(students.map((s: any) => s.$id));
 
-      setStudents(res.documents);
-    } catch (error) {
-      console.error("Failed to load students:", error);
-      setStudents([]);
-    } finally {
-      setStudentsLoading(false);
-    }
-  };
-
+    // You must have an Appwrite Function deployed that returns Auth users list
+    // OR manually create DB docs here for known missing users
+    alert("To fully sync, deploy the Appwrite Function described in the setup guide.\n\nFor now, use the Refresh button after creating users via this admin panel.");
+    await loadStudents();
+  } catch (err: any) {
+    alert("Sync failed: " + err.message);
+  } finally {
+    setStudentsLoading(false);
+  }
+};
 
 const handleCreateUser = async () => {
   if (!createUserForm.name.trim() || !createUserForm.email.trim() || !createUserForm.password.trim()) {
@@ -593,7 +610,7 @@ const handleCreateUser = async () => {
   setIsCreatingUser(true);
 
   try {
-    const result = await createAdminUser({
+const result = await createAdminUser({
       name: createUserForm.name.trim(),
       email: createUserForm.email.trim(),
       password: createUserForm.password.trim(),
@@ -606,14 +623,34 @@ const handleCreateUser = async () => {
 
     setShowCreateUserModal(false);
     setCreateUserForm({
-      name: "",
-      email: "",
-      password: "",
-      role: "user",
-      accountStatus: "active",
-      emailVerified: true,
+      name: "", email: "", password: "",
+      role: "user", accountStatus: "active", emailVerified: true,
     });
 
+    // ✅ ADD THIS BLOCK — optimistic insert so the user shows up immediately
+    setStudents(prev => [
+      {
+        $id: result.$id || result.userId || `temp-${Date.now()}`,
+        $createdAt: new Date().toISOString(),
+        name: createUserForm.name.trim(),
+        email: createUserForm.email.trim(),
+        role: createUserForm.role,
+        accountStatus: createUserForm.accountStatus || "active",
+        subscriptionPlan: "basic",
+        subscriptionStatus: "inactive",
+        subscriptionPaidAt: null,
+        subscriptionStartAt: null,
+        subscriptionEndAt: null,
+        transactionHistory: "[]",
+        presenceStatus: "offline",
+        lastActivityAt: null,
+        lastSeenAt: null,
+      },
+      ...prev,
+    ]);
+
+    // Wait briefly for Appwrite to propagate, then re-sync
+    await new Promise(resolve => setTimeout(resolve, 800));
     await loadStudents();
   } catch (error: any) {
     console.error("Failed to create user:", error);
@@ -975,7 +1012,7 @@ const resolvedEndAt =
       })()
     : null);
 
-    await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, editingStudent.$id, {
+await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, editingStudent.$id, {
       name: studentForm.name.trim(),
       role: studentForm.role,
       accountStatus: studentForm.accountStatus,
@@ -987,9 +1024,29 @@ const resolvedEndAt =
       transactionHistory: JSON.stringify(transactions),
     });
 
+    // ✅ ADD THIS BLOCK — optimistic local update
+    setStudents(prev =>
+      prev.map(s =>
+        s.$id === editingStudent.$id
+          ? {
+              ...s,
+              name: studentForm.name.trim(),
+              role: studentForm.role,
+              accountStatus: studentForm.accountStatus,
+              subscriptionPlan: resolvedPlan,
+              subscriptionStatus: resolvedStatus,
+              subscriptionPaidAt: resolvedPaidAt,
+              subscriptionStartAt: resolvedStartAt,
+              subscriptionEndAt: resolvedEndAt,
+              transactionHistory: JSON.stringify(transactions),
+            }
+          : s
+      )
+    );
+
     setShowStudentEditModal(false);
     setEditingStudent(null);
-    await loadStudents();
+    await loadStudents(); // still re-syncs in background
   } catch (error) {
     console.error("Failed to update student:", error);
     alert("Failed to update student. Make sure transactionHistory exists in Appwrite.");
@@ -8419,12 +8476,20 @@ const filteredStudents = onlyStudents.filter((student: any) => {
                 <Plus className="w-4 h-4" />
                 Create User
               </button>
-              <button
-                onClick={loadStudents}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                {studentsLoading ? "Refreshing..." : "Refresh"}
-              </button>
+<button
+  onClick={syncAuthUsers}
+  disabled={studentsLoading}
+  className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 flex items-center gap-2"
+>
+  ⟳ Sync Auth Users
+</button>
+<button
+  onClick={loadStudents}
+  disabled={studentsLoading}
+  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+>
+  {studentsLoading ? "Refreshing..." : "Refresh"}
+</button>
             </div>
 			
           </div>

@@ -11,8 +11,14 @@ type CreateAdminUserPayload = {
 };
 
 export const createAdminUser = async (payload: CreateAdminUserPayload) => {
+  const functionId = import.meta.env.VITE_APPWRITE_CREATE_ADMIN_USER_FUNCTION_ID;
+
+  if (!functionId) {
+    throw new Error("Missing VITE_APPWRITE_CREATE_ADMIN_USER_FUNCTION_ID");
+  }
+
   const execution = await functions.createExecution({
-    functionId: import.meta.env.VITE_APPWRITE_CREATE_ADMIN_USER_FUNCTION_ID,
+    functionId,
     body: JSON.stringify(payload),
     async: false,
     path: "/",
@@ -22,10 +28,17 @@ export const createAdminUser = async (payload: CreateAdminUserPayload) => {
     },
   });
 
-  const body = execution.responseBody ? JSON.parse(execution.responseBody) : {};
+  let body: any = {};
+  try {
+    body = execution.responseBody ? JSON.parse(execution.responseBody) : {};
+  } catch {
+    body = {};
+  }
 
   if (execution.responseStatusCode >= 400 || !body.success) {
-    throw new Error(body.message || "Failed to create admin user");
+    throw new Error(
+      body.message || `Function failed with status ${execution.responseStatusCode}`
+    );
   }
 
   return body;

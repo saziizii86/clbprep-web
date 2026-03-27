@@ -472,7 +472,7 @@ const onSignup = async (e: React.FormEvent) => {
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                        placeholder="e.g., Mohsen"
+                        placeholder="e.g., John"
                         type="text"
                       />
                     </div>

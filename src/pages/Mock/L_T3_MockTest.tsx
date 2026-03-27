@@ -801,11 +801,7 @@ const goNext = async () => {
         </Modal>
       </PracticeFrame>
 
-      {/* Developer hint */}
-      <div className="mx-auto w-[min(1080px,95vw)] mt-3 text-[11px] text-gray-500">
-        Loaded material: <span className="font-mono">{material.id}</span>
-        {material.title ? <span> · {material.title}</span> : null}
-      </div>
+
     </div>
   );
 }

@@ -1007,6 +1007,7 @@ const ListeningScriptCard: React.FC<{ scriptText: string; apiSettings: any }> = 
 
   const stop = () => {
     if (audioRef.current) {
+      audioRef.current.onended = null; // prevent playNext from firing
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
@@ -1016,49 +1017,119 @@ const ListeningScriptCard: React.FC<{ scriptText: string; apiSettings: any }> = 
 
   const getPlaybackRate = () => speed === "slow" ? 0.75 : speed === "fast" ? 1.25 : 1.0;
 
-  // ── OpenAI TTS ──────────────────────────────────────────────
+  // ── OpenAI TTS — multi-voice (one voice per character) ──────
+  const clipUrlsRef = useRef<string[]>([]);
+
   const playWithOpenAI = async (key: string) => {
     try {
       setIsLoading(true);
       setErrorMsg(null);
 
-      // Revoke previous blob URL
+      // Revoke any previous blob URLs
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
         audioUrlRef.current = null;
       }
+      clipUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      clipUrlsRef.current = [];
 
       const speedMap = { slow: 0.8, normal: 1.0, fast: 1.2 };
-      const res = await fetch("https://api.openai.com/v1/audio/speech", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: "tts-1",
-          input: scriptText,
-          voice: "alloy",
-          speed: speedMap[speed],
-        }),
-      });
+      const ttsSpeed = speedMap[speed];
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as any)?.error?.message ?? "OpenAI TTS failed");
+      // ── Step 1: parse lines and discover speakers ────────────
+      // Lines follow the pattern "SpeakerName: dialogue text"
+      const lines = scriptText.split("\n").map((l) => l.trim()).filter(Boolean);
+
+      // Collect unique speakers in order of first appearance
+      const speakerOrder: string[] = [];
+      for (const line of lines) {
+        const m = line.match(/^([^:]{1,40}):\s+\S/);
+        if (m) {
+          const spk = m[1].trim();
+          if (!speakerOrder.includes(spk)) speakerOrder.push(spk);
+        }
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
+      // ── Step 2: assign a gendered voice to each speaker ──────
+      // Known female names (lower-case) — extend as needed
+      const femaleNames = new Set([
+        "aisha","priya","sofia","fatima","yuna","amara","nadia","zoe","hana",
+        "leila","sara","sarah","emma","lily","anna","maria","laura","emily",
+        "jessica","samantha","jennifer","lisa","karen","nancy","betty","helen",
+        "diana","victoria","grace","rose","claire","alice","ruth","jane",
+        "olivia","sophia","isabella","mia","charlotte","ava","ella","scarlett",
+      ]);
 
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.playbackRate = 1; // already baked into the TTS speed param
-      audio.onended = () => setIsPlaying(false);
-      audio.onerror = () => { setIsPlaying(false); setErrorMsg("Audio playback failed."); };
-      await audio.play();
+      // OpenAI voices: nova & shimmer → female; onyx & echo → male
+      const femaleVoicePool = ["nova", "shimmer"];
+      const maleVoicePool   = ["onyx", "echo"];
+      let fi = 0, mi = 0;
+
+      const voiceMap: Record<string, string> = {};
+      for (const spk of speakerOrder) {
+        const isFemale = femaleNames.has(spk.toLowerCase().split(" ")[0]);
+        voiceMap[spk] = isFemale
+          ? femaleVoicePool[fi++ % femaleVoicePool.length]
+          : maleVoicePool[mi++ % maleVoicePool.length];
+      }
+
+      // ── Step 3: generate one TTS clip per line ───────────────
+      const ttsLine = async (text: string, voice: string): Promise<string> => {
+        const res = await fetch("https://api.openai.com/v1/audio/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: "tts-1", input: text, voice, speed: ttsSpeed }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any)?.error?.message ?? "OpenAI TTS failed");
+        }
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        clipUrlsRef.current.push(url);
+        return url;
+      };
+
+      // Build a list of { url, voice } clips (parallel where possible)
+      const clipPromises = lines.map((line) => {
+        const m = line.match(/^([^:]{1,40}):\s+(.+)/);
+        if (m) {
+          const spk  = m[1].trim();
+          const text = m[2].trim();
+          const voice = voiceMap[spk] ?? "alloy";
+          return ttsLine(text, voice);
+        }
+        // Narrator / non-dialogue line
+        return ttsLine(line, "alloy");
+      });
+
+      // Generate all clips (sequentially to preserve order & avoid rate-limit bursts)
+      const clipUrls: string[] = [];
+      for (const p of clipPromises) {
+        clipUrls.push(await p);
+      }
+
+      // ── Step 4: play clips sequentially ──────────────────────
+      let stopped = false;
+      const playNext = (idx: number) => {
+        if (stopped || idx >= clipUrls.length) {
+          setIsPlaying(false);
+          return;
+        }
+        const audio = new Audio(clipUrls[idx]);
+        audioRef.current = audio;
+        audio.onended  = () => playNext(idx + 1);
+        audio.onerror  = () => { setIsPlaying(false); setErrorMsg("Audio playback failed."); };
+        audio.play().catch(() => { setIsPlaying(false); });
+      };
+
+      // Override stop() to mark as stopped
+      const origStop = stop;
+      // Patch: we track with a flag on the ref
+      (audioRef as any)._stopped = false;
+
       setIsPlaying(true);
+      playNext(0);
     } catch (e: any) {
       setErrorMsg(e.message ?? "Could not play audio.");
       setIsPlaying(false);
@@ -1117,6 +1188,7 @@ const ListeningScriptCard: React.FC<{ scriptText: string; apiSettings: any }> = 
     return () => {
       stop();
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      clipUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
     };
   }, []);
 

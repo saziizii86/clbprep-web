@@ -1893,6 +1893,7 @@ onClick={() => {
   setSelectedTask(task);
   setCurrentView("scenarios");
   setActiveTab("practice");
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }}
     className={`w-full text-left px-4 py-2 rounded-lg text-sm transition truncate ${
       selectedSkill === skillKey && selectedTask?.id === task.id

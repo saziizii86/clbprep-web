@@ -560,14 +560,17 @@ const SHELL_PAD = 'p-4 sm:p-6';
       {hasVideo && (
         <div className="flex-1 min-h-0 mb-3">
           <video
-            ref={videoRef}
-            src={videoUrl}
-            className="w-full h-full object-contain rounded-2xl bg-black"
-            onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={handleLoadedMetadata}
-            onEnded={handleMediaEnded}
-            controls={false}
-          />
+  ref={videoRef}
+  src={videoUrl}
+  className="w-full h-full object-contain rounded-2xl bg-black"
+  onTimeUpdate={handleTimeUpdate}
+  onLoadedMetadata={handleLoadedMetadata}
+  onEnded={handleMediaEnded}
+  controls={false}
+  playsInline
+  webkit-playsinline="true"
+  muted={false}
+/>
         </div>
       )}
 

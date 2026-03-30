@@ -140,7 +140,7 @@ function PracticeFrame({
 }) {
   return (
     <div className="w-full">
-      <div className="mx-auto w-[min(1080px,95vw)] bg-white border border-gray-300 shadow-sm">
+      <div className="mx-auto w-full max-w-[1080px] bg-white border border-gray-300 shadow-sm">
         {/* Header bar - Purple/Indigo gradient */}
         <div className="h-10 px-4 flex items-center justify-between bg-gradient-to-r from-indigo-600 via-purple-600 to-purple-500 border-b border-indigo-700">
           <div className="text-sm font-semibold text-white">{headerTitle}</div>
@@ -163,7 +163,7 @@ function PracticeFrame({
         </div>
 
         {/* Body */}
-        <div className="min-h-[620px]">{children}</div>
+        <div className="min-h-[min(620px,calc(100vh-9rem))]">{children}</div>
 
         {/* Footer bar */}
         <div className="h-11 px-4 flex items-center justify-between bg-slate-100 border-t border-slate-300">

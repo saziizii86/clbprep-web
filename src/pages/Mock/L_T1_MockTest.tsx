@@ -174,7 +174,7 @@ function PracticeFrame({
   return (
     <div className="w-full">
       {/* Frame matching original 1080px width */}
-      <div className="mx-auto w-[min(1080px,95vw)] bg-white border border-gray-300 shadow-sm">
+      <div className="mx-auto w-full max-w-[1080px] bg-white border border-gray-300 shadow-sm">
         {/* Header bar - Purple/Indigo gradient like Mock Exams page */}
         <div className="h-10 px-4 flex items-center justify-between bg-gradient-to-r from-indigo-600 via-purple-600 to-purple-500 border-b border-indigo-700">
           <div className="text-sm font-semibold text-white">{headerTitle}</div>
@@ -197,7 +197,7 @@ function PracticeFrame({
         </div>
 
         {/* Body - Same min-height as original (620px) */}
-        <div className="min-h-[620px]">{children}</div>
+        <div className="min-h-[min(620px,calc(100vh-9rem))]">{children}</div>
 
         {/* Footer bar - Light gray with visible BACK button */}
         <div className="h-11 px-4 flex items-center justify-between bg-slate-100 border-t border-slate-300">
@@ -658,7 +658,7 @@ const goNext = async () => {
                   <img
                     src={contextImageUrl}
                     alt="Context"
-                    className="max-h-[320px] w-auto rounded border border-gray-200 bg-white"
+                    className="max-h-[min(320px,calc(100vh-22rem))] w-auto rounded border border-gray-200 bg-white"
                   />
                 ) : (
                   <div className="text-center text-gray-500 text-sm py-14">
@@ -752,7 +752,7 @@ const goNext = async () => {
         {/* QUESTION */}
         {step.kind === "question" && !isFinished ? (
           <div className="h-full">
-            <div className="grid grid-cols-2 min-h-[620px]">
+            <div className="grid grid-cols-2 min-h-[min(620px,calc(100vh-9rem))]">
               {/* Left: audio */}
               <div className="p-6 border-r border-gray-300">
                 <div className="flex items-start gap-3 mb-4">

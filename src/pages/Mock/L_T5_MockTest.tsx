@@ -177,7 +177,7 @@ function PracticeFrame({
 }) {
   return (
     <div className="w-full">
-      <div className="mx-auto w-[min(1080px,95vw)] bg-white border border-gray-300 shadow-sm">
+      <div className="mx-auto w-full max-w-[1080px] bg-white border border-gray-300 shadow-sm">
         <div className="h-10 px-4 flex items-center justify-between bg-gradient-to-r from-indigo-600 via-purple-600 to-purple-500 border-b border-indigo-700">
           <div className="text-sm font-semibold text-white">{headerTitle}</div>
           <div className="flex items-center gap-3">
@@ -198,7 +198,7 @@ function PracticeFrame({
           </div>
         </div>
 
-        <div className="min-h-[620px]">{children}</div>
+        <div className="min-h-[min(620px,calc(100vh-9rem))]">{children}</div>
 
         <div className="h-11 px-4 flex items-center justify-between bg-slate-100 border-t border-slate-300">
           <div className="flex items-center gap-3">
@@ -646,7 +646,7 @@ const goNext = async () => {
         ) : null}
 
         {step.kind === "questions-all" ? (
-          <div className="p-10">
+          <div className="p-4 sm:p-6">
             <div className="mx-auto max-w-4xl">
               <div className="flex items-start gap-2 text-sm font-semibold text-gray-900 mb-4">
                 <Info className="w-4 h-4 mt-[2px] text-indigo-600" />
@@ -658,7 +658,7 @@ const goNext = async () => {
                   No questions found. Please check uploadedFiles.questionAnswers in your DB for this material.
                 </div>
               ) : (
-                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                <div className="bg-white border border-gray-200 rounded-2xl p-6 overflow-y-auto min-h-[calc(min(620px,calc(100vh-9rem))-5.5rem)] max-h-[calc(min(620px,calc(100vh-9rem))-5.5rem)]">
                   <div className="space-y-4">
                     {Array.from({ length: totalQuestions }).map((_, idx) => {
                       const { stem, options } = getQuestionStemAndOptions(idx);

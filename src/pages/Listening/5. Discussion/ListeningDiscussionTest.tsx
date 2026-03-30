@@ -1,5 +1,6 @@
 // src/pages/Listening/5. Discussion/ListeningDiscussionTest.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { 
   ArrowLeft, ArrowRight, Clock, Volume2, 
   Play, Pause, CheckCircle, Info, Headphones,
@@ -117,6 +118,8 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
   
   const [transcript, setTranscript] = useState('');
 const [transcriptLoading, setTranscriptLoading] = useState(false);
+const [pendingAutoplay, setPendingAutoplay] = useState(false);
+const [mediaError, setMediaError] = useState('');
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -244,23 +247,67 @@ const getTranscriptSource = () => {
     }
   }, [phase]);
 
+useEffect(() => {
+  if (phase === 'media' && pendingAutoplay) {
+    void attemptMediaAutoplay();
+  }
+}, [phase, pendingAutoplay, hasVideo]);
+
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const togglePlayPause = () => {
-    const media = hasVideo ? videoRef.current : audioRef.current;
-    if (media && !hasPlayedMedia) {
-      if (isPlaying) {
-        media.pause();
-      } else {
-        media.play();
-      }
-      setIsPlaying(!isPlaying);
+const attemptMediaAutoplay = async () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (!media) return false;
+
+  try {
+    media.currentTime = 0;
+
+    const playPromise = media.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      await playPromise;
     }
-  };
+
+    setIsPlaying(true);
+    setMediaError('');
+    setPendingAutoplay(false);
+    return true;
+  } catch (error) {
+    console.warn('[ListeningDiscussionTest] Autoplay failed:', error);
+    setIsPlaying(false);
+    setMediaError('Autoplay was blocked on this device. Tap Play to start.');
+    return false;
+  }
+};
+
+
+const togglePlayPause = async () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (!media || hasPlayedMedia) return;
+
+  if (isPlaying) {
+    media.pause();
+    setIsPlaying(false);
+    return;
+  }
+
+  try {
+    const playPromise = media.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      await playPromise;
+    }
+    setIsPlaying(true);
+    setMediaError('');
+  } catch (error) {
+    console.error('[ListeningDiscussionTest] Manual play failed:', error);
+    setIsPlaying(false);
+    setMediaError('This device blocked playback. Please try again.');
+  }
+};
 
 // ✅ NEW: Seek helpers (like NewsItem slider)
 const seekToPercent = (pct: number) => {
@@ -323,23 +370,18 @@ const seekBySeconds = (deltaSeconds: number) => {
   };
 
   const handleNext = () => {
-    if (phase === "instructions") {
-      setPhase("media");
+if (phase === "instructions") {
+setSavedToDb(false);
+setIsSaving(false);
+setPendingAutoplay(false);
+setMediaError('');
 
-      // ✅ Auto play media when user clicks Continue
-      setTimeout(() => {
-        const media = hasVideo ? videoRef.current : audioRef.current;
-        if (!media) return;
+  flushSync(() => {
+    setPhase("media");
+  });
 
-        media.currentTime = 0;
-        media
-          .play()
-          .then(() => setIsPlaying(true))
-          .catch((err) => {
-            console.warn("Autoplay blocked:", err);
-          });
-      }, 150);
-    } else if (phase === 'media') {
+  void attemptMediaAutoplay();
+} else if (phase === 'media') {
       if (hasVideo && videoRef.current) {
         videoRef.current.pause();
       }
@@ -557,31 +599,63 @@ const SHELL_PAD = 'p-4 sm:p-6';
       </div>
 
       {/* Video — flex-1 min-h-0 so it SHRINKS to fit, never overflows */}
-      {hasVideo && (
-        <div className="flex-1 min-h-0 mb-3">
-          <video
-  ref={videoRef}
-  src={videoUrl}
-  className="w-full h-full object-contain rounded-2xl bg-black"
-  onTimeUpdate={handleTimeUpdate}
-  onLoadedMetadata={handleLoadedMetadata}
-  onEnded={handleMediaEnded}
-  controls={false}
-  playsInline
-  webkit-playsinline="true"
-  muted={false}
-/>
-        </div>
-      )}
+{hasVideo && (
+  <div className="flex-1 min-h-0 mb-3">
+    <video
+      ref={videoRef}
+      src={videoUrl}
+      className="w-full h-full object-contain rounded-2xl bg-black"
+      onTimeUpdate={handleTimeUpdate}
+      onLoadedMetadata={handleLoadedMetadata}
+      onCanPlay={() => {
+        if (phase === 'media' && pendingAutoplay) {
+          void attemptMediaAutoplay();
+        }
+      }}
+      onPlay={() => setIsPlaying(true)}
+      onPause={() => setIsPlaying(false)}
+      onEnded={handleMediaEnded}
+      onError={(e) => {
+        const videoEl = e.currentTarget;
+        console.error('[ListeningDiscussionTest] Video error:', videoEl.error, videoUrl);
+        setIsPlaying(false);
+        setPendingAutoplay(false);
+        setMediaError('This video could not be played on this device. Please upload MP4 (H.264 + AAC).');
+      }}
+      playsInline
+      autoPlay
+      preload="auto"
+      controls={false}
+    />
+  </div>
+)}
 
       {/* Audio fallback */}
-      {!hasVideo && hasAudio && (
-        <audio ref={audioRef} src={audioUrl}
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
-          onEnded={handleMediaEnded}
-        />
-      )}
+{!hasVideo && hasAudio && (
+  <audio
+    ref={audioRef}
+    src={audioUrl}
+    onTimeUpdate={handleTimeUpdate}
+    onLoadedMetadata={handleLoadedMetadata}
+    onCanPlay={() => {
+      if (phase === 'media' && pendingAutoplay) {
+        void attemptMediaAutoplay();
+      }
+    }}
+    onPlay={() => setIsPlaying(true)}
+    onPause={() => setIsPlaying(false)}
+    onEnded={handleMediaEnded}
+    onError={(e) => {
+      const audioEl = e.currentTarget;
+      console.error('[ListeningDiscussionTest] Audio error:', audioEl.error, audioUrl);
+      setIsPlaying(false);
+      setPendingAutoplay(false);
+      setMediaError('This audio could not be played on this device.');
+    }}
+    autoPlay
+    preload="auto"
+  />
+)}
 
       {/* Play Controls — flex-shrink-0 so always visible */}
       <div className="flex items-center gap-3 sm:gap-4 mb-3 flex-shrink-0">

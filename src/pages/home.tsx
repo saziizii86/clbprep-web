@@ -169,7 +169,7 @@ useEffect(() => {
 }, [currentPage]);
 
 const API_BASE_URL =
-  import.meta.env.VITE_STRIPE_SERVER_URL || "http://localhost:4242";
+  (import.meta.env.VITE_STRIPE_SERVER_URL || "").trim().replace(/\/+$/, "");
 
 const handleProtectedPlanSelect = async (plan: PlanKey) => {
   try {
@@ -197,6 +197,11 @@ const handleProtectedPlanSelect = async (plan: PlanKey) => {
       bimonthly: 20.00,
       quarterly: 30.00,
     };
+	
+	if (!API_BASE_URL || !/^https?:\/\//.test(API_BASE_URL)) {
+  alert("Stripe server URL is missing or invalid. Please check VITE_STRIPE_SERVER_URL in .env");
+  return;
+}
 
     const res2 = await fetch(`${API_BASE_URL}/create-checkout-session`, {
       method: "POST",

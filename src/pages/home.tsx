@@ -197,25 +197,25 @@ const handleProtectedPlanSelect = async (plan: PlanKey) => {
       bimonthly: 20.00,
       quarterly: 30.00,
     };
-	
-	if (!API_BASE_URL || !/^https?:\/\//.test(API_BASE_URL)) {
+
+if (!API_BASE_URL || !/^https?:\/\//.test(API_BASE_URL)) {
   alert("Stripe server URL is missing or invalid. Please check VITE_STRIPE_SERVER_URL in .env");
   return;
 }
 
-    const res2 = await fetch(`${API_BASE_URL}/create-checkout-session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        planKey: plan,
-        email: me.email || "",
-        name: me.name || "",
-        appwriteUserId: me.$id || "",
-        isUpgrade,
-        upgradeAmount: isUpgrade ? upgradeAmounts[plan] : undefined,
-        currentSubscriptionEndAt: isUpgrade ? endAt : undefined,
-      }),
-    });
+const res2 = await fetch(`${API_BASE_URL}/create-checkout-session`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    planKey: plan,
+    email: me.email || "",
+    name: me.name || "",
+    appwriteUserId: me.$id || "",
+    isUpgrade,
+    upgradeAmount: isUpgrade ? upgradeAmounts[plan] : undefined,
+    currentSubscriptionEndAt: isUpgrade ? endAt : undefined,
+  }),
+});
 
     const data = await res2.json();
     if (data?.url) {

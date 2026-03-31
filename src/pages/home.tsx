@@ -3,7 +3,7 @@ import helloImg from "../images/hello.png";
 import featureImg from "../images/feature.png";
 
 import PricingPage, { type PlanKey } from "./pricing";
-import PurchasePage from "./purchase";
+
 import { account, databases, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
 
 import PrivacyPolicy from "./privacy";
@@ -128,7 +128,13 @@ export default function CelpipMasterHome() {
   const [currentPage, setCurrentPage] = useState<
     "home" | "pricing" | "purchase" | "privacy" | "terms" | "refund" | "contact"
   >("home");
-  const [selectedPlan, setSelectedPlan] = useState<PlanKey>("monthly");
+
+
+const [userSubscription, setUserSubscription] = useState<{
+  plan: string;
+  status: string;
+  endAt: string | null;
+} | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -140,16 +146,83 @@ export default function CelpipMasterHome() {
     }
   }, [location.search, navigate]);
 
-  const handleProtectedPlanSelect = async (plan: PlanKey) => {
+useEffect(() => {
+  if (currentPage !== "pricing") return;
+  const load = async () => {
     try {
-      await account.get();
-      setSelectedPlan(plan);
-      setCurrentPage("purchase");
-    } catch {
-      sessionStorage.setItem("postLoginRedirect", "pricing");
-      navigate("/login");
-    }
+      const me = await account.get();
+      const email = (me.email || "").trim().toLowerCase();
+      const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+        Query.equal("email", email),
+      ]);
+      if (res.documents.length) {
+        const doc = res.documents[0] as any;
+        setUserSubscription({
+          plan: doc.subscriptionPlan || "basic",
+          status: doc.subscriptionStatus || "inactive",
+          endAt: doc.subscriptionEndAt || null,
+        });
+      }
+    } catch {}
   };
+  void load();
+}, [currentPage]);
+
+const API_BASE_URL =
+  import.meta.env.VITE_STRIPE_SERVER_URL || "http://localhost:4242";
+
+const handleProtectedPlanSelect = async (plan: PlanKey) => {
+  try {
+    const me = await account.get();
+    const email = (me.email || "").trim().toLowerCase();
+
+    // Load user's current subscription
+    const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+      Query.equal("email", email),
+    ]);
+
+    const userDoc = res.documents.length ? res.documents[0] as any : null;
+    const currentPlan = userDoc?.subscriptionPlan || "basic";
+    const currentStatus = userDoc?.subscriptionStatus || "inactive";
+    const endAt = userDoc?.subscriptionEndAt || null;
+
+    const isActiveAIOnly =
+      currentPlan === "ai-monthly" &&
+      (currentStatus === "active" || currentStatus === "cancelling") &&
+      (!endAt || new Date(endAt).getTime() > Date.now());
+
+    const isUpgrade = isActiveAIOnly && plan !== "ai-monthly";
+    const upgradeAmounts: Record<string, number> = {
+      monthly: 10.00,
+      bimonthly: 20.00,
+      quarterly: 30.00,
+    };
+
+    const res2 = await fetch(`${API_BASE_URL}/create-checkout-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        planKey: plan,
+        email: me.email || "",
+        name: me.name || "",
+        appwriteUserId: me.$id || "",
+        isUpgrade,
+        upgradeAmount: isUpgrade ? upgradeAmounts[plan] : undefined,
+        currentSubscriptionEndAt: isUpgrade ? endAt : undefined,
+      }),
+    });
+
+    const data = await res2.json();
+    if (data?.url) {
+      window.location.href = data.url;
+    } else {
+      alert(data?.error || "Failed to start checkout.");
+    }
+  } catch {
+    sessionStorage.setItem("postLoginRedirect", "pricing");
+    navigate("/login");
+  }
+};
 
   const handlePricingBack = async () => {
     try {
@@ -179,25 +252,21 @@ export default function CelpipMasterHome() {
     }
   };
 
-  if (currentPage === "pricing") {
-    return (
-      <PricingPage
-        onBackHome={() => {
-          void handlePricingBack();
-        }}
-        onSelectPlan={handleProtectedPlanSelect}
-      />
-    );
-  }
+if (currentPage === "pricing") {
+  return (
+    <PricingPage
+      onBackHome={() => {
+        void handlePricingBack();
+      }}
+      onSelectPlan={handleProtectedPlanSelect}
+      currentPlan={userSubscription?.plan}
+      currentStatus={userSubscription?.status}
+      subscriptionEndAt={userSubscription?.endAt}
+    />
+  );
+}
 
-  if (currentPage === "purchase") {
-    return (
-      <PurchasePage
-        selectedPlanKey={selectedPlan}
-        onBackPricing={() => setCurrentPage("pricing")}
-      />
-    );
-  }
+
 
   if (currentPage === "privacy") {
     return <PrivacyPolicy onBack={() => setCurrentPage("home")} />;

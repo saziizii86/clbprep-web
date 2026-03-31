@@ -1,4 +1,7 @@
 // src/pages/userHome.tsx
+const STRIPE_SERVER_URL =
+  import.meta.env.VITE_STRIPE_SERVER_URL || "http://localhost:4242";
+
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";
 import ListeningForInformationPracticeTest from './Listening/3. Listening for Information/ListeningForInformationPracticeTest';
@@ -128,9 +131,9 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  document.documentElement.scrollTop = 0;
-  document.body.scrollTop = 0;
+  if (activeTab === "dashboard" && currentView === "dashboard") {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
 }, [activeTab, currentView]);
 
 useEffect(() => {
@@ -201,12 +204,15 @@ const [subscription, setSubscription] = useState<{
     transactionHistory: [],
   });
 
-  const isProMember =
-    subscription.status === "active" &&
-    (!subscription.endAt || new Date(subscription.endAt).getTime() > Date.now());
+const isProMember =
+  (subscription.status === "active" || subscription.status === "cancelling") &&
+  (!subscription.endAt || new Date(subscription.endAt).getTime() > Date.now());
+	
+	const isAIOnly = isProMember && subscription.plan === "ai-monthly";
+const isFullPro = isProMember && subscription.plan !== "ai-monthly";
 
 const canAccessScenario = (scenarioIndex: number) => {
-  return isProMember || scenarioIndex === 0; // Basic user can access only Scenario 1
+ return isFullPro || scenarioIndex === 0;
 };
 
 const canAccessMockExam = (exam: any) => {
@@ -218,7 +224,7 @@ const canAccessMockExam = (exam: any) => {
       0
     );
 
-  return isProMember || mockNumber === 1; // Basic user can access only Mock Test 1
+  return isFullPro || mockNumber === 1;
 };
 
 const openUpgradeModal = (message?: string) => {
@@ -277,14 +283,14 @@ useEffect(() => {
 }, [location.search]);
 
 useEffect(() => {
-const loadSubscription = async () => {
-  try {
-    const me = await account.get();
-    const email = (me.email || "").trim().toLowerCase();
+  const loadSubscription = async () => {
+    try {
+      const me = await account.get();
+      const email = (me.email || "").trim().toLowerCase();
 
-    const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
-      Query.equal("email", email),
-    ]);
+      const res = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+        Query.equal("email", email),
+      ]);
 
       if (!res.documents.length) return;
 
@@ -297,12 +303,14 @@ const loadSubscription = async () => {
         return;
       }
 
-let parsedHistory = [];
+      let parsedHistory = [];
       try {
         if (userDoc.transactionHistory) {
           parsedHistory = JSON.parse(userDoc.transactionHistory);
         }
-      } catch { parsedHistory = []; }
+      } catch {
+        parsedHistory = [];
+      }
 
       setSubscription({
         plan: userDoc.subscriptionPlan || "basic",
@@ -318,36 +326,58 @@ let parsedHistory = [];
         paymentBrand: userDoc.paymentBrand || null,
         transactionHistory: parsedHistory,
       });
-	  
-
-      // ✅ END OF ADDED LINES ↑
-	  
     } catch (error) {
       console.log("Could not load subscription", error);
     }
   };
 
-  loadSubscription();
+  const verifyCheckoutAndReload = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const isCheckoutSuccess = params.get("checkout") === "success";
+    const sessionId = params.get("session_id");
+
+    if (!isCheckoutSuccess || !sessionId) {
+      await loadSubscription();
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${STRIPE_SERVER_URL}/checkout-session/${sessionId}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.log("Checkout verification did not complete:", data?.error || res.statusText);
+      }
+    } catch (error) {
+      console.log("Checkout verification request failed", error);
+    }
+
+    await loadSubscription();
+  };
+
+  void verifyCheckoutAndReload();
 
   const params = new URLSearchParams(window.location.search);
   const isCheckoutSuccess = params.get("checkout") === "success";
 
-// ✅ AFTER — keeps retrying for 45 seconds to catch Stripe's webhook retry:
-if (isCheckoutSuccess) {
-  const retry1 = setTimeout(loadSubscription, 2000);
-  const retry2 = setTimeout(loadSubscription, 5000);
-  const retry3 = setTimeout(loadSubscription, 10000);
-  const retry4 = setTimeout(loadSubscription, 20000);
-  const retry5 = setTimeout(loadSubscription, 35000);  // catches Stripe's ~30s retry
+  if (isCheckoutSuccess) {
+    const retry1 = setTimeout(verifyCheckoutAndReload, 2000);
+    const retry2 = setTimeout(verifyCheckoutAndReload, 5000);
+    const retry3 = setTimeout(verifyCheckoutAndReload, 10000);
+    const retry4 = setTimeout(verifyCheckoutAndReload, 20000);
+    const retry5 = setTimeout(verifyCheckoutAndReload, 35000);
 
-  return () => {
-    clearTimeout(retry1);
-    clearTimeout(retry2);
-    clearTimeout(retry3);
-    clearTimeout(retry4);
-    clearTimeout(retry5);
-  };
-}
+    return () => {
+      clearTimeout(retry1);
+      clearTimeout(retry2);
+      clearTimeout(retry3);
+      clearTimeout(retry4);
+      clearTimeout(retry5);
+    };
+  }
 }, []);
 
 const updatePresence = async (patch: Record<string, any>) => {
@@ -1951,7 +1981,7 @@ onClick={() => {
               isProMember ? "text-amber-600" : "text-gray-500"
             }`}
           >
-            {isProMember ? "Pro Member" : "Basic"}
+            {isAIOnly ? "AI Builder" : isFullPro ? "Pro Member" : "Basic"}
           </p>
         </div>
 
@@ -1972,6 +2002,16 @@ onClick={() => {
   >
     <Crown className="w-4 h-4" />
     <span>Upgrade to Pro</span>
+  </button>
+)}
+
+{isAIOnly && (
+  <button
+    onClick={handleUpgradeToPro}
+    className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-violet-700 hover:bg-violet-50"
+  >
+    <Crown className="w-4 h-4" />
+    <span>Upgrade to Full Access</span>
   </button>
 )}
 
@@ -2031,16 +2071,16 @@ const SubscriptionView = () => {
   const params = new URLSearchParams(window.location.search);
   const justPaid = params.get("checkout") === "success";
 
-  const [subTab, setSubTab] = React.useState<"details" | "history">(
-    justPaid ? "history" : "details"
-  );
+const [subTab, setSubTab] = React.useState<"details" | "history">("details");
 
-  const planLabels: Record<string, string> = {
-    weekly: "1 Week (7 Days)",
-    monthly: "1 Month (30 Days)",
-    quarterly: "3 Months (90 Days)",
-    basic: "Basic (Free)",
-  };
+const planLabels: Record<string, string> = {
+  weekly: "1 Week (7 Days)",
+  monthly: "1 Month (30 Days)",
+  bimonthly: "2 Months (60 Days)",
+  quarterly: "3 Months (90 Days)",
+  "ai-monthly": "AI Builder (Monthly)",
+  basic: "Basic (Free)",
+};
 
   const formatDate = (iso: string | null) => {
     if (!iso) return "—";
@@ -2087,7 +2127,7 @@ const SubscriptionView = () => {
         {isProMember && (
           <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700">
             <Crown className="w-4 h-4" />
-            Pro Member
+            {isAIOnly ? "AI Builder" : "Pro Member"}
           </div>
         )}
       </div>
@@ -2125,12 +2165,14 @@ const SubscriptionView = () => {
                   Membership
                 </p>
                 <h3 className="mt-1 text-2xl font-bold text-gray-900">
-                  {isProMember ? "Pro Member Subscription" : "Basic Membership"}
+                  {isAIOnly ? "AI Skill Builder Pro" : isFullPro ? "Pro Member Subscription" : "Basic Membership"}
                 </h3>
                 <p className="mt-2 text-sm text-gray-700">
-                  {isProMember
-                    ? "You have full access to premium practice scenarios and mock exams."
-                    : "Upgrade to Pro to unlock all practice scenarios and mock exams."}
+                  {isAIOnly
+  ? "You have full access to AI Skill Builders. Upgrade to Pro for full exam access."
+  : isFullPro
+  ? "You have full access to premium practice scenarios and mock exams."
+  : "Upgrade to Pro to unlock all practice scenarios and mock exams."}
                 </p>
               </div>
             </div>
@@ -2322,14 +2364,47 @@ const SubscriptionView = () => {
               </div>
             </div>
 
-            {!isProMember && (
-              <button
-                onClick={handleUpgradeToPro}
-                className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 py-3 font-semibold text-white transition hover:brightness-105"
-              >
-                Upgrade to Pro
-              </button>
-            )}
+{isAIOnly && subscription.status !== "cancelling" && (
+  <button
+    onClick={async () => {
+      if (!confirm("Cancel your AI Builder subscription? You'll keep access until your billing period ends.")) return;
+      try {
+        const me = await account.get();
+        const res = await fetch(`${STRIPE_SERVER_URL}/cancel-subscription`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            appwriteUserId: me.$id,
+            email: me.email,
+          }),
+        });
+        const data = await res.json();
+        if (data?.ok) {
+          alert("Your subscription has been cancelled. You'll keep access until " + formatDate(subscription.endAt));
+          window.location.href = "/userhome";
+        } else {
+          alert(data?.error || "Failed to cancel.");
+        }
+      } catch {
+        alert("Failed to cancel subscription.");
+      }
+    }}
+    className="mt-4 w-full rounded-xl border border-red-300 bg-white py-3 font-semibold text-red-600 transition hover:bg-red-50"
+  >
+    Cancel Subscription
+  </button>
+)}
+
+{isAIOnly && subscription.status === "cancelling" && (
+  <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-center">
+    <p className="text-sm font-semibold text-orange-700">
+      ⚠️ Subscription Cancelled
+    </p>
+    <p className="mt-1 text-xs text-orange-600">
+      Your access continues until {formatDate(subscription.endAt)} and will not renew.
+    </p>
+  </div>
+)}
           </div>
         </div>
       )}
@@ -4499,7 +4574,7 @@ onClick={() => {
   <SubscriptionView />
 ) : activeTab === "skill-builders" ? (
   <AISkillBuilders
-    isProMember={isProMember}
+    isProMember={isProMember}  // keep this — AI users are still "pro" for this section
     openUpgradeModal={openUpgradeModal}
     userId={userRowId ?? undefined}
     onBack={() => {

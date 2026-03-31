@@ -1044,12 +1044,36 @@ await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, editingStudent.
       )
     );
 
-    setShowStudentEditModal(false);
+setShowStudentEditModal(false);
     setEditingStudent(null);
-    await loadStudents(); // still re-syncs in background
   } catch (error) {
     console.error("Failed to update student:", error);
     alert("Failed to update student. Make sure transactionHistory exists in Appwrite.");
+  }
+};
+
+const handleDeleteStudent = async (student: any) => {
+  if (!confirm(`Delete "${student.name}" (${student.email})? This cannot be undone.`)) return;
+  try {
+    // Delete DB document
+    await databases.deleteDocument(DATABASE_ID, USERS_COLLECTION_ID, student.$id);
+
+    // Also delete from Appwrite Auth so email can be reused
+    await fetch(
+      `${import.meta.env.VITE_APPWRITE_ENDPOINT}/users/${student.$id}`,
+      {
+        method: "DELETE",
+        headers: {
+          "X-Appwrite-Project": import.meta.env.VITE_APPWRITE_PROJECT_ID,
+          "X-Appwrite-Key": import.meta.env.VITE_APPWRITE_API_KEY,
+        },
+      }
+    );
+
+    setStudents(prev => prev.filter(s => s.$id !== student.$id));
+} catch (error: any) {
+    console.error("Delete error:", error);
+    alert("Failed to delete student: " + (error?.message || "Unknown error"));
   }
 };
   
@@ -8619,7 +8643,8 @@ const filteredStudents = onlyStudents.filter((student: any) => {
     {formatDateTime(student.subscriptionEndAt)}
   </td>
 
-  <td className="px-3 py-3 text-gray-700">
+<td className="px-3 py-3 text-gray-700">
+  <div className="flex items-center gap-2">
     <button
       onClick={() => openStudentEditor(student)}
       className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
@@ -8627,7 +8652,15 @@ const filteredStudents = onlyStudents.filter((student: any) => {
       <Edit className="w-4 h-4" />
       Edit
     </button>
-  </td>
+    <button
+      onClick={() => handleDeleteStudent(student)}
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700"
+    >
+      <Trash2 className="w-4 h-4" />
+      Delete
+    </button>
+  </div>
+</td>
 </tr>
                     );
                   })

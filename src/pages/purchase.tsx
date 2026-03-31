@@ -34,7 +34,6 @@ const plans: Plan[] = [
     originalPrice: 39,
     salePrice: 19.99,
     badge: "49% OFF",
-    note: "Good for learners who need short-term access before the exam.",
   },
   {
     key: "bimonthly",
@@ -43,7 +42,6 @@ const plans: Plan[] = [
     originalPrice: 59,
     salePrice: 29.99,
     badge: "49% OFF",
-    note: "Best balance for regular study, mock tests, and practice review.",
   },
   {
     key: "quarterly",
@@ -52,11 +50,20 @@ const plans: Plan[] = [
     originalPrice: 79,
     salePrice: 39.99,
     badge: "49% OFF",
-    note: "Best value for users who want longer preparation and repeated practice.",
+  },
+  // ✅ ADD THIS:
+  {
+    key: "ai-monthly",
+    name: "AI Builder",
+    duration: "Monthly Subscription",
+    originalPrice: 9.99,
+    salePrice: 9.99,
+    badge: "AI Only",
   },
 ];
 
-const API_BASE_URL = "http://localhost:4242";
+const API_BASE_URL =
+  import.meta.env.VITE_STRIPE_SERVER_URL || "http://localhost:4242";
 
 export default function PurchasePage({ selectedPlanKey, onBackPricing }: PurchasePageProps) {
   const [form, setForm] = useState({

@@ -95,6 +95,10 @@ export default function PricingPage({ onBackHome, onSelectPlan, currentPlan, cur
       .then((me) => { setIsLoggedIn(true); setViewerLabel((me.name || me.email || "User").trim()); })
       .catch(() => { setIsLoggedIn(false); setViewerLabel(""); });
   }, []);
+  
+  useEffect(() => {
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}, []);
 
   const viewerInitial = (viewerLabel?.charAt(0) || "U").toUpperCase();
   
@@ -120,7 +124,7 @@ const upgradePrices: Record<string, number> = {
         <div className="absolute bottom-0 left-1/2 h-[300px] w-[600px] -translate-x-1/2 rounded-full bg-violet-100/40 blur-[80px]" />
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mx-auto max-w-[1400px] px-4 py-4 lg:px-6">
 
         {/* ── Top bar ───────────────────────────────────────── */}
         <div className="flex items-center justify-between">

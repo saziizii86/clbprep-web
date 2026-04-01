@@ -6,6 +6,10 @@ const STRIPE_SERVER_URL =
   )
     .trim()
     .replace(/\/+$/, "");
+	
+	
+	const DELETE_ACCOUNT_FUNCTION_ID =
+  (import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID || "").trim();
 
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";
@@ -52,7 +56,7 @@ import ReadingTest from "../pages/Reading/ReadingTest";
 import FeedbackPage from "./feedback";
 
 
-import { account, databases, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
+import { account, databases, functions, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
 import { Query } from "appwrite";
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useState, useEffect } from 'react';
@@ -3963,20 +3967,22 @@ const PracticeTestView = () => {
     const [localCurrentPassword, setLocalCurrentPassword] = useState('');
     const [localNewPassword, setLocalNewPassword] = useState('');
     const [localConfirmPassword, setLocalConfirmPassword] = useState('');
+	const [deleteConfirmText, setDeleteConfirmText] = useState('');
+const [isDeletingAccount, setIsDeletingAccount] = useState(false);
     
     if (!showSettingsModal) return null;
     
     const handleSave = () => {
       // Update parent state only when saving
-      setSettingsForm({
-        ...settingsForm,
-        notifications: localNotifications,
-        darkMode: localDarkMode,
-        displayName: localDisplayName,
-        currentPassword: localCurrentPassword,
-        newPassword: localNewPassword,
-        confirmPassword: localConfirmPassword
-      });
+setSettingsForm({
+  ...settingsForm,
+  notifications: localNotifications,
+  darkMode: localDarkMode,
+  displayName: localDisplayName,
+  currentPassword: localCurrentPassword,
+  newPassword: localNewPassword,
+  confirmPassword: localConfirmPassword
+});
       setSettingsMessage({ type: 'success', text: 'Settings saved successfully!' });
       setTimeout(() => {
         setShowSettingsModal(false);
@@ -3984,6 +3990,58 @@ const PracticeTestView = () => {
       }, 1500);
     };
     
+const handleDeleteAccount = async () => {
+  if (deleteConfirmText.trim() !== "DELETE") {
+    setSettingsMessage({
+      type: "error",
+      text: 'Please type DELETE to confirm account deletion.',
+    });
+    return;
+  }
+
+  if (!DELETE_ACCOUNT_FUNCTION_ID) {
+    setSettingsMessage({
+      type: "error",
+      text: "Delete account function ID is missing. Add VITE_DELETE_ACCOUNT_FUNCTION_ID to your frontend .env file.",
+    });
+    return;
+  }
+
+  setIsDeletingAccount(true);
+  setSettingsMessage({ type: "", text: "" });
+
+  try {
+    const me = await account.get();
+
+    const execution = await functions.createExecution(
+      DELETE_ACCOUNT_FUNCTION_ID,
+      JSON.stringify({
+        userId: me.$id,
+        userRowId: userRowId || null,
+      }),
+      false
+    );
+
+    const result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success) {
+      throw new Error(result.error || "Account deletion failed.");
+    }
+
+    try {
+      await account.deleteSession("current");
+    } catch {}
+
+    window.location.href = "/login";
+  } catch (error: any) {
+    setSettingsMessage({
+      type: "error",
+      text: error?.message || "Failed to delete account. Please try again.",
+    });
+    setIsDeletingAccount(false);
+  }
+};
+
     const handlePasswordUpdate = async () => {
       if (!localCurrentPassword || !localNewPassword || !localConfirmPassword) {
         setSettingsMessage({ type: 'error', text: 'Please fill in all password fields' });
@@ -4063,7 +4121,7 @@ const PracticeTestView = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
                     type="email"
-                    value="user@celpip.com"
+                    value={settingsForm.email}
                     readOnly
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
                   />
@@ -4144,6 +4202,41 @@ const PracticeTestView = () => {
                 
               </div>
             </div>
+			
+			            {/* Danger Zone Section */}
+            <div className="border border-red-200 rounded-xl p-4 bg-red-50">
+              <h3 className="text-lg font-semibold text-red-700 mb-1">Danger Zone</h3>
+              <p className="text-sm text-red-500 mb-4">
+                Deleting your account is permanent and cannot be undone. All your data, progress, and subscription will be lost.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-red-700 mb-1">
+                    Type <span className="font-bold">DELETE</span> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="DELETE"
+                    className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none bg-white"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDeleteAccount}
+                  disabled={isDeletingAccount || deleteConfirmText !== 'DELETE'}
+                  className={`w-full py-2 rounded-lg font-medium transition ${
+                    deleteConfirmText === 'DELETE' && !isDeletingAccount
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-red-200 text-red-400 cursor-not-allowed'
+                  }`}
+                >
+                  {isDeletingAccount ? 'Deleting Account...' : 'Delete My Account'}
+                </button>
+              </div>
+            </div>
+			
           </div>
           
           {/* Footer - Fixed */}

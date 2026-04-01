@@ -168,8 +168,11 @@ useEffect(() => {
   void load();
 }, [currentPage]);
 
-const API_BASE_URL =
-  (import.meta.env.VITE_STRIPE_SERVER_URL || "").trim().replace(/\/+$/, "");
+const API_BASE_URL = import.meta.env.DEV
+  ? "/stripe-api"
+  : (import.meta.env.VITE_STRIPE_SERVER_URL || "https://69cbc5d30012adab01cd.tor.appwrite.run")
+      .trim()
+      .replace(/\/+$/, "");
 
 const handleProtectedPlanSelect = async (plan: PlanKey) => {
   try {
@@ -197,8 +200,8 @@ const handleProtectedPlanSelect = async (plan: PlanKey) => {
       bimonthly: 20.00,
       quarterly: 30.00,
     };
-
-if (!API_BASE_URL || !/^https?:\/\//.test(API_BASE_URL)) {
+	
+if (!API_BASE_URL) {
   alert("Stripe server URL is missing or invalid. Please check VITE_STRIPE_SERVER_URL in .env");
   return;
 }
@@ -217,15 +220,27 @@ const res2 = await fetch(`${API_BASE_URL}/create-checkout-session`, {
   }),
 });
 
-    const data = await res2.json();
-    if (data?.url) {
-      window.location.href = data.url;
-    } else {
-      alert(data?.error || "Failed to start checkout.");
-    }
-  } catch {
-    sessionStorage.setItem("postLoginRedirect", "pricing");
-    navigate("/login");
+let data: any = {};
+try {
+  data = await res2.json();
+} catch {
+  data = {};
+}
+
+if (!res2.ok) {
+  console.error("Checkout session failed:", res2.status, data);
+  alert(data?.error || `Failed to start checkout (${res2.status})`);
+  return;
+}
+
+if (data?.url) {
+  window.location.href = data.url;
+} else {
+  alert("Checkout URL was not returned by the server.");
+}
+} catch (err) {
+    console.error("Checkout error:", err);
+    alert("Something went wrong starting checkout. Please try again.");
   }
 };
 

@@ -1,6 +1,11 @@
 // src/pages/userHome.tsx
 const STRIPE_SERVER_URL =
-  (import.meta.env.VITE_STRIPE_SERVER_URL || "").trim().replace(/\/+$/, "");
+  (
+    import.meta.env.VITE_STRIPE_SERVER_URL ||
+    "https://69cbc5d30012adab01cd.tor.appwrite.run"
+  )
+    .trim()
+    .replace(/\/+$/, "");
 
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";

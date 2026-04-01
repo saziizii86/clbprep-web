@@ -5,6 +5,8 @@ import Login from "./pages/login";
 import UserHome from "./pages/userHome";
 import Admin from "./pages/admin";
 import VerifyPage from "./pages/verify";
+import ProtectedRoute from "./components/ProtectedRoute";   // ← ADD
+import AdminRoute from "./components/AdminRoute";           // ← ADD
 
 function App() {
   return (
@@ -15,8 +17,8 @@ function App() {
         <Route path="/login" element={<Login />} />
         
         {/* Protected routes */}
-        <Route path="/userhome" element={<UserHome />} />
-        <Route path="/admin" element={<Admin />} />
+        <Route path="/userhome" element={<ProtectedRoute><UserHome /></ProtectedRoute>} />   {/* ← CHANGED */}
+        <Route path="/admin"    element={<AdminRoute><Admin /></AdminRoute>} />              {/* ← CHANGED */}
         
         {/* Email verification */}
         <Route path="/verify" element={<VerifyPage />} />

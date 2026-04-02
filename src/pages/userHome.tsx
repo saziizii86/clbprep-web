@@ -8,11 +8,8 @@ const STRIPE_SERVER_URL =
     .replace(/\/+$/, "");
 	
 	
-const DELETE_ACCOUNT_FUNCTION_ID =
-  (
-    import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID ||
-    "69cc9f0c002fc8d26a6e"
-  ).trim();
+	const DELETE_ACCOUNT_FUNCTION_ID =
+  (import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID || "").trim();
 
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";
@@ -147,6 +144,12 @@ useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }
 }, [activeTab, currentView]);
+
+useEffect(() => {
+  if (activeTab === "practice" && currentView === "scenarios") {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
+}, [activeTab, currentView, selectedSkill, selectedTask]);
 
 useEffect(() => {
   const handleClickOutside = (event: MouseEvent) => {
@@ -343,32 +346,33 @@ useEffect(() => {
     }
   };
 
-  const verifyCheckoutAndReload = async () => {
-    const params = new URLSearchParams(window.location.search);
-    const isCheckoutSuccess = params.get("checkout") === "success";
-    const sessionId = params.get("session_id");
+const verifyCheckoutAndReload = async () => {
+  const params = new URLSearchParams(window.location.search);
+  const isCheckoutSuccess = params.get("checkout") === "success";
+  const sessionId = params.get("session_id");
 
-    if (!isCheckoutSuccess || !sessionId) {
-      await loadSubscription();
+  if (!isCheckoutSuccess || !sessionId) {
+    await loadSubscription();
+    return;
+  }
+
+  try {
+    const res = await fetch(`${STRIPE_SERVER_URL}/checkout-session/${sessionId}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      console.log("Checkout verification did not complete:", data?.error || res.statusText);
       return;
     }
 
-    try {
-      const res = await fetch(
-        `${STRIPE_SERVER_URL}/checkout-session/${sessionId}`
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        console.log("Checkout verification did not complete:", data?.error || res.statusText);
-      }
-    } catch (error) {
-      console.log("Checkout verification request failed", error);
-    }
-
     await loadSubscription();
-  };
+
+    // remove success params so it does not run again
+    window.history.replaceState({}, "", "/userhome");
+  } catch (error) {
+    console.log("Checkout verification request failed", error);
+  }
+};
 
   void verifyCheckoutAndReload();
 
@@ -1700,10 +1704,11 @@ sectionTranscripts: material.skill === "reading"
     setActiveTab('practice');
   };
 
-  const handleTaskClick = (task) => {
-    setSelectedTask(task);
-    setCurrentView('scenarios');
-  };
+const handleTaskClick = (task) => {
+  setSelectedTask(task);
+  setCurrentView('scenarios');
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+};
   
     // Chaning for problem solving
 	const handleBack = () => {
@@ -1935,6 +1940,7 @@ onClick={() => {
   setSelectedTask(task);
   setCurrentView("scenarios");
   setActiveTab("practice");
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 }}
     className={`w-full text-left px-4 py-2 rounded-lg text-sm transition truncate ${
       selectedSkill === skillKey && selectedTask?.id === task.id
@@ -2622,11 +2628,12 @@ const planLabels: Record<string, string> = {
                   return (
                     <button
                       key={task.id}
-                      onClick={() => {
-                        setSelectedSkill(skillKey);
-                        setSelectedTask(task);
-                        setCurrentView('scenarios');
-                      }}
+onClick={() => {
+  setSelectedSkill(skillKey);
+  setSelectedTask(task);
+  setCurrentView('scenarios');
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}}
                       className="w-full bg-white rounded-xl p-4 border border-gray-200 hover:shadow-md hover:border-gray-300 transition text-left"
                     >
                       <div className="mb-2">

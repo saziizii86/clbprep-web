@@ -147,6 +147,19 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  
+  const [showIOSStartOverlay, setShowIOSStartOverlay] = useState(false);
+
+const isiPhoneSafari = React.useMemo(() => {
+  if (typeof navigator === 'undefined') return false;
+
+  const ua = navigator.userAgent || '';
+  const isIPhone = /iPhone/i.test(ua);
+  const isWebKit = /WebKit/i.test(ua);
+  const isOtherIOSBrowser = /CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
+
+  return isIPhone && isWebKit && !isOtherIOSBrowser;
+}, []);
 
   const uploadedFiles = React.useMemo(() => {
     const raw = scenario?.uploadedFiles;
@@ -280,36 +293,78 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const attemptMediaAutoplay = async () => {
-    const media = hasVideo ? videoRef.current : audioRef.current;
-    if (!media) return false;
+const attemptMediaAutoplay = async () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (!media) return false;
 
-    if (!media.paused && !media.ended) {
-      setIsPlaying(true);
-      setMediaError('');
-      setPendingAutoplay(false);
-      return true;
+  if (!media.paused && !media.ended) {
+    setIsPlaying(true);
+    setMediaError('');
+    setPendingAutoplay(false);
+    setShowIOSStartOverlay(false);
+    return true;
+  }
+
+  try {
+    media.currentTime = 0;
+
+    const playPromise = media.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      await playPromise;
     }
 
-    try {
-      media.currentTime = 0;
+    setIsPlaying(true);
+    setMediaError('');
+    setPendingAutoplay(false);
+    setShowIOSStartOverlay(false);
+    return true;
+  } catch (error: any) {
+    console.warn('[ListeningDiscussionTest] Autoplay failed:', error);
+    setIsPlaying(false);
 
-      const playPromise = media.play();
-      if (playPromise && typeof playPromise.then === 'function') {
-        await playPromise;
+    if (error?.name === 'NotAllowedError') {
+      if (isiPhoneSafari && hasVideo) {
+        setShowIOSStartOverlay(true);
+        setMediaError('Tap once to start the video on iPhone.');
+      } else {
+        setMediaError('Autoplay was blocked on this device. Tap Play to start.');
       }
-
-      setIsPlaying(true);
-      setMediaError('');
-      setPendingAutoplay(false);
-      return true;
-    } catch (error) {
-      console.warn('[ListeningDiscussionTest] Autoplay failed:', error);
-      setIsPlaying(false);
-      setMediaError('Autoplay was blocked on this device. Tap Play to start.');
-      return false;
+    } else if (error?.name === 'NotSupportedError') {
+      setMediaError('This video format could not be played on this device.');
+    } else {
+      setMediaError('Playback could not start automatically on this device.');
     }
-  };
+
+    return false;
+  }
+};
+
+const handleIOSStartPlayback = async () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (!media) return;
+
+  try {
+    media.currentTime = 0;
+
+    const playPromise = media.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      await playPromise;
+    }
+
+    setIsPlaying(true);
+    setMediaError('');
+    setPendingAutoplay(false);
+    setShowIOSStartOverlay(false);
+  } catch (error: any) {
+    console.error('[ListeningDiscussionTest] iPhone manual play failed:', error);
+
+    if (error?.name === 'NotSupportedError') {
+      setMediaError('This video format could not be played on iPhone.');
+    } else {
+      setMediaError('Playback could not start on iPhone.');
+    }
+  }
+};
 
   const togglePlayPause = async () => {
     const media = hasVideo ? videoRef.current : audioRef.current;
@@ -397,9 +452,10 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
   };
 
   const handleNext = () => {
-    if (phase === 'instructions') {
-      setMediaError('');
-      setPendingAutoplay(true);
+if (phase === 'instructions') {
+  setMediaError('');
+  setShowIOSStartOverlay(false);
+  setPendingAutoplay(true);
 
       flushSync(() => {
         setPhase('media');
@@ -428,20 +484,21 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
     }
   };
 
-  const handleBack = () => {
-    if (phase === 'media') {
-      if (hasVideo && videoRef.current) {
-        videoRef.current.pause();
-      }
-      if (hasAudio && audioRef.current) {
-        audioRef.current.pause();
-      }
+const handleBack = () => {
+  if (phase === 'media') {
+    if (hasVideo && videoRef.current) {
+      videoRef.current.pause();
+    }
+    if (hasAudio && audioRef.current) {
+      audioRef.current.pause();
+    }
 
-      setIsPlaying(false);
-      setPendingAutoplay(false);
-      setMediaError('');
-      setPhase('instructions');
-    } else if (phase === 'question') {
+    setIsPlaying(false);
+    setPendingAutoplay(false);
+    setShowIOSStartOverlay(false);
+    setMediaError('');
+    setPhase('instructions');
+  } else if (phase === 'question') {
       if (currentQuestionIndex > 0) {
         setCurrentQuestionIndex((prev) => prev - 1);
       } else {
@@ -520,9 +577,10 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
     setTestStartTime(null);
     setIsPlaying(false);
     setSavedToDb(false);
-    setIsSaving(false);
-    setPendingAutoplay(false);
-    setMediaError('');
+setIsSaving(false);
+setPendingAutoplay(false);
+setShowIOSStartOverlay(false);
+setMediaError('');
   };
 
   // Load transcript
@@ -654,7 +712,7 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
 
       {/* Video */}
       {hasVideo && (
-        <div className="flex-1 min-h-0 mb-3">
+        <div className="flex-1 min-h-0 mb-3 relative">
           <video
             ref={videoRef}
             src={videoUrl}
@@ -666,7 +724,11 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
                 void attemptMediaAutoplay();
               }
             }}
-            onPlay={() => setIsPlaying(true)}
+            onPlay={() => {
+  setIsPlaying(true);
+  setShowIOSStartOverlay(false);
+  setMediaError('');
+}}
             onPause={() => setIsPlaying(false)}
             onEnded={handleMediaEnded}
             onError={(e) => {
@@ -683,6 +745,18 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
             preload="auto"
             controls={false}
           />
+		  
+		  {showIOSStartOverlay && (
+  <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/45">
+    <button
+      type="button"
+      onClick={handleIOSStartPlayback}
+      className="px-5 py-3 rounded-2xl bg-white text-slate-900 font-semibold shadow-xl hover:bg-slate-100 transition"
+    >
+      Tap to start video
+    </button>
+  </div>
+)}
         </div>
       )}
 
@@ -866,12 +940,13 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
         {/* Back button */}
         <div className="mt-auto pt-3 border-t border-slate-200 flex items-center justify-end flex-shrink-0">
           <button
-            onClick={() => {
-              setPhase('media');
-              setHasPlayedMedia(false);
-              setPendingAutoplay(false);
-              setMediaError('');
-            }}
+onClick={() => {
+  setPhase('media');
+  setHasPlayedMedia(false);
+  setPendingAutoplay(false);
+  setShowIOSStartOverlay(false);
+  setMediaError('');
+}}
             className="px-4 sm:px-6 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 text-sm sm:text-base"
           >
             BACK

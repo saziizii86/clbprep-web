@@ -8,8 +8,11 @@ const STRIPE_SERVER_URL =
     .replace(/\/+$/, "");
 	
 	
-	const DELETE_ACCOUNT_FUNCTION_ID =
-  (import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID || "").trim();
+const DELETE_ACCOUNT_FUNCTION_ID =
+  (
+    import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID ||
+    "69cc9f0c002fc8d26a6e"
+  ).trim();
 
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";

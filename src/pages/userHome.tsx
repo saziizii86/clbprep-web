@@ -94,12 +94,14 @@ export default function CelpipPracticeDashboard() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(
-    typeof window !== 'undefined' ? window.innerWidth >= 768 : true
-  );
-
+const [isDesktop, setIsDesktop] = useState(
+  typeof window !== 'undefined'
+    ? window.innerWidth >= 768 && window.innerHeight >= 600
+    : true
+);
   useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    const handleResize = () =>
+  setIsDesktop(window.innerWidth >= 768 && window.innerHeight >= 600);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);

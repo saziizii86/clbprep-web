@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ID, Query } from "appwrite";
 import { X } from "lucide-react";
+import SEO from "../components/SEO";
 
 // ✅ Update this path to wherever your Appwrite client is
 // Must export: account, databases, DATABASE_ID, USERS_COLLECTION_ID
@@ -359,6 +360,12 @@ const onSignup = async (e: React.FormEvent) => {
 
   return (
     <>
+	
+	      <SEO
+        title="Login to CLBPrep"
+        description="Log in to access CELPIP practice tests and track your progress."
+        canonical="/login"
+      />
       <PolicyModal type={openModal} onClose={() => setOpenModal(null)} />
 
       {showVerifyScreen ? (

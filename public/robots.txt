@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /userhome
+Disallow: /admin
+Disallow: /verify
+
+Sitemap: https://clbprep.com/sitemap.xml

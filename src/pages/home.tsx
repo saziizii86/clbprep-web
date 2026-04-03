@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import helloImg from "../images/hello.png";
 import featureImg from "../images/feature.png";
+import SEO from "../components/SEO";
 
 import PricingPage, { type PlanKey } from "./pricing";
 
@@ -306,6 +307,13 @@ if (currentPage === "pricing") {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 text-slate-900">
+	
+	<SEO
+        title="Free CELPIP Practice Tests & Exam Prep"
+        description="Canada's #1 CELPIP prep platform. Free practice tests, expert tips, and personalized feedback to ace your exam."
+        canonical="/"
+      />
+	  
       <SiteHeader
         onOpenPricing={() => setCurrentPage("pricing")}
         onOpenContact={() => setCurrentPage("contact")}

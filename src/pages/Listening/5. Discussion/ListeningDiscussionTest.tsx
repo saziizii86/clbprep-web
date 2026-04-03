@@ -147,6 +147,8 @@ const ListeningDiscussionTest: React.FC<ListeningDiscussionTestProps> = ({
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const initialMediaLoadRetriedRef = useRef(false);
+const autoplayFallbackStartedRef = useRef(false);
   
   const [showIOSStartOverlay, setShowIOSStartOverlay] = useState(false);
 
@@ -280,12 +282,26 @@ const isiPhoneSafari = React.useMemo(() => {
     }
   }, [phase, testStartTime]);
 
-  // Retry autoplay when media page is open
-  useEffect(() => {
-    if (phase === 'media' && pendingAutoplay) {
-      void attemptMediaAutoplay();
-    }
-  }, [phase, pendingAutoplay, hasVideo]);
+// Safety-net retry — only fires if onCanPlay hasn't resolved it yet
+useEffect(() => {
+  if (phase !== 'media' || !pendingAutoplay) return;
+
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (!media) return;
+
+  autoplayFallbackStartedRef.current = false;
+  initialMediaLoadRetriedRef.current = false;
+  setMediaError('');
+
+  const timer = setTimeout(() => {
+    if (!media.paused || media.ended || autoplayFallbackStartedRef.current) return;
+
+    autoplayFallbackStartedRef.current = true;
+    void attemptMediaAutoplay();
+  }, 200);
+
+  return () => clearTimeout(timer);
+}, [phase, pendingAutoplay, hasVideo, videoUrl, audioUrl]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -337,6 +353,34 @@ const attemptMediaAutoplay = async () => {
 
     return false;
   }
+};
+const handleMediaLoadError = () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+
+  setIsPlaying(false);
+
+  if (!initialMediaLoadRetriedRef.current && media) {
+    initialMediaLoadRetriedRef.current = true;
+    setMediaError('');
+
+    setTimeout(() => {
+      try {
+        media.load();
+      } catch (error) {
+        console.error('[ListeningDiscussionTest] Retry load failed:', error);
+      }
+    }, 250);
+
+    return;
+  }
+
+  setPendingAutoplay(false);
+  setShowIOSStartOverlay(false);
+  setMediaError(
+    hasVideo
+      ? 'This video could not be played on this device. Please upload MP4 (H.264 + AAC).'
+      : 'This audio could not be played on this device.'
+  );
 };
 
 const handleIOSStartPlayback = async () => {
@@ -432,12 +476,13 @@ const handleIOSStartPlayback = async () => {
     }
   };
 
-  const handleLoadedMetadata = () => {
-    const media = hasVideo ? videoRef.current : audioRef.current;
-    if (media?.duration) {
-      setMediaDuration(Math.floor(media.duration));
-    }
-  };
+const handleLoadedMetadata = () => {
+  const media = hasVideo ? videoRef.current : audioRef.current;
+  if (media?.duration) {
+    setMediaDuration(Math.floor(media.duration));
+  }
+  setMediaError('');
+};
 
   const handleMediaEnded = () => {
     setIsPlaying(false);
@@ -456,13 +501,8 @@ if (phase === 'instructions') {
   setMediaError('');
   setShowIOSStartOverlay(false);
   setPendingAutoplay(true);
-
-      flushSync(() => {
-        setPhase('media');
-      });
-
-      void attemptMediaAutoplay();
-    } else if (phase === 'media') {
+  setPhase('media');
+} else if (phase === 'media') {
       if (hasVideo && videoRef.current) {
         videoRef.current.pause();
       }
@@ -723,11 +763,14 @@ const renderMedia = () => (
               className="w-full h-full object-contain rounded-2xl bg-black"
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
-              onCanPlay={() => {
-                if (phase === 'media' && pendingAutoplay) {
-                  void attemptMediaAutoplay();
-                }
-              }}
+onCanPlay={() => {
+  setMediaError('');
+
+  if (phase === 'media' && pendingAutoplay) {
+    autoplayFallbackStartedRef.current = true;
+    void attemptMediaAutoplay();
+  }
+}}
               onPlay={() => {
                 setIsPlaying(true);
                 setShowIOSStartOverlay(false);
@@ -735,15 +778,11 @@ const renderMedia = () => (
               }}
               onPause={() => setIsPlaying(false)}
               onEnded={handleMediaEnded}
-              onError={(e) => {
-                const videoEl = e.currentTarget;
-                console.error('[ListeningDiscussionTest] Video error:', videoEl.error, videoUrl);
-                setIsPlaying(false);
-                setPendingAutoplay(false);
-                setMediaError(
-                  'This video could not be played on this device. Please upload MP4 (H.264 + AAC).'
-                );
-              }}
+onError={(e) => {
+  const videoEl = e.currentTarget;
+  console.error('[ListeningDiscussionTest] Video error:', videoEl.error, videoUrl);
+  handleMediaLoadError();
+}}
               playsInline
               autoPlay
               preload="auto"
@@ -771,21 +810,22 @@ const renderMedia = () => (
             src={audioUrl}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
-            onCanPlay={() => {
-              if (phase === 'media' && pendingAutoplay) {
-                void attemptMediaAutoplay();
-              }
-            }}
+onCanPlay={() => {
+  setMediaError('');
+
+  if (phase === 'media' && pendingAutoplay) {
+    autoplayFallbackStartedRef.current = true;
+    void attemptMediaAutoplay();
+  }
+}}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onEnded={handleMediaEnded}
-            onError={(e) => {
-              const audioEl = e.currentTarget;
-              console.error('[ListeningDiscussionTest] Audio error:', audioEl.error, audioUrl);
-              setIsPlaying(false);
-              setPendingAutoplay(false);
-              setMediaError('This audio could not be played on this device.');
-            }}
+onError={(e) => {
+  const audioEl = e.currentTarget;
+  console.error('[ListeningDiscussionTest] Audio error:', audioEl.error, audioUrl);
+  handleMediaLoadError();
+}}
             autoPlay
             preload="auto"
           />

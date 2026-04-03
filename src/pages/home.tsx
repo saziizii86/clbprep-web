@@ -307,13 +307,6 @@ if (currentPage === "pricing") {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 text-slate-900">
-	
-	<SEO
-        title="Free CELPIP Practice Tests & Exam Prep"
-        description="Canada's #1 CELPIP prep platform. Free practice tests, expert tips, and personalized feedback to ace your exam."
-        canonical="/"
-      />
-	  
       <SiteHeader
         onOpenPricing={() => setCurrentPage("pricing")}
         onOpenContact={() => setCurrentPage("contact")}
@@ -362,16 +355,10 @@ function SiteHeader({
 
   return (
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <a href="/" className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-sm">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">CLBPrep</div>
-            <div className="text-xs text-slate-500">CELPIP practice platform</div>
-          </div>
-        </a>
+<div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5">
+  <a href="/" className="flex items-center">
+    <img src="/CLBPrep.png" alt="CLBPrep" className="h-24 w-auto object-contain" />
+  </a>
 
         {/* Desktop nav */}
         <nav className="hidden items-center gap-6 text-sm text-slate-700 md:flex">
@@ -751,12 +738,9 @@ function SiteFooter({
         <div className="rounded-[1.5rem] bg-white/10 p-5 backdrop-blur">
           <div className="grid gap-6 md:grid-cols-4">
             <div>
-              <div className="flex items-center gap-2">
-                <div className="grid h-8 w-8 place-items-center rounded-lg bg-white/15 text-white shadow-sm">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <div className="text-sm font-semibold">CLBPrep</div>
-              </div>
+<div className="flex items-center">
+  <img src="/footer_CLBPrep.png" alt="CLBPrep" className="h-12 w-auto brightness-0 invert object-contain" />
+</div>
               <p className="mt-2 text-xs leading-5 text-white/80">
                 Your trusted partner for CELPIP exam success.
               </p>

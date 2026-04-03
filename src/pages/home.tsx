@@ -458,12 +458,12 @@ function Hero() {
     <section className="bg-gradient-to-b from-slate-100 via-blue-50/70 to-indigo-50/60">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:grid-cols-2 md:items-center md:py-20">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-4 py-1.5 text-xs font-semibold shadow-md shadow-indigo-100 ring-1 ring-indigo-100/60">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-            <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              Canada's #1 CELPIP Prep Platform
-            </span>
-          </div>
+<div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-5 py-2 text-sm md:text-base font-semibold shadow-md shadow-indigo-100 ring-1 ring-indigo-100/60">
+  <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+  <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+    Canada's #1 CELPIP Prep Platform
+  </span>
+</div>
 
           <h1 className="mt-5 text-4xl font-semibold tracking-tight md:text-5xl">
             Ace Your CELPIP Exam

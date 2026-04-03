@@ -320,7 +320,7 @@ if (currentPage === "pricing") {
         <FaqSection />
       </main>
 
-     <SiteFooter onOpenPage={(page) => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); }} />
+      <SiteFooter onOpenPage={(page) => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); }} />
 
     </div>
   );

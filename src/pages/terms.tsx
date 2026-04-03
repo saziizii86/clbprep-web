@@ -29,7 +29,8 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm md:p-12">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Terms of Service</h1>
           <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: March 2026</p>
-          <p className="mt-1 text-sm text-slate-500">CLBPrep (operated by Soheila Azizi) — Halifax, Nova Scotia, Canada</p>
+          <p className="mt-1 text-sm text-slate-500">CLBPrep, operated by Azizi Online Learning Services — Halifax, Nova Scotia, Canada</p>
+
 
           <hr className="my-6 border-slate-100" />
 
@@ -43,7 +44,7 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
           <Section title="2. About the Service">
             <p>
               CLBPrep is an independent online study platform that provides practice materials, mock
-              exams, and AI-assisted tools to help users prepare for the CELPIP test. The platform is operated by Soheila Azizi as a sole proprietorship based in Halifax, Nova Scotia, Canada, and is{" "}
+              exams, and AI-assisted tools to help users prepare for the CELPIP test. The platform is operated by Azizi Online Learning Services, based in Halifax, Nova Scotia, Canada, and is{" "}
               <strong>not affiliated with, endorsed by, or connected to</strong> Paragon Testing
               Enterprises or any official exam body.
             </p>
@@ -69,49 +70,20 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
           </Section>
 
           <Section title="5. Subscriptions & Payment">
-            <p>
-              CLBPrep offers the following one-time subscription plans that provide full access to all
-              premium materials for the selected duration:
-            </p>
-
-            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Plan</th>
-                    <th className="px-4 py-3">Duration</th>
-                    <th className="px-4 py-3">Price</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  <tr>
-                    <td className="px-4 py-3">1 Month</td>
-                    <td className="px-4 py-3">30 days full access</td>
-                    <td className="px-4 py-3">$19.99 CAD</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3">2 Months</td>
-                    <td className="px-4 py-3">60 days full access</td>
-                    <td className="px-4 py-3">$29.99 CAD</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3">3 Months</td>
-                    <td className="px-4 py-3">90 days full access</td>
-                    <td className="px-4 py-3">$39.99 CAD</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <ul className="mt-4 list-disc space-y-1 pl-5">
-              <li>
-                All plans are <strong>one-time payments</strong>. There is no automatic renewal.
-              </li>
-              <li>All prices are in Canadian dollars (CAD).</li>
-              <li>Payments are processed securely via Stripe. We do not store your card details.</li>
-              <li>Access expires at the end of the purchased duration.</li>
-            </ul>
-          </Section>
+  <p>
+    CLBPrep offers one-time and recurring subscription plans that provide access to
+    platform features for the selected duration. Current pricing and plan details are
+    always available on our{" "}
+    <a href="#" className="text-indigo-600 hover:underline">Pricing page</a>.
+  </p>
+  <ul className="mt-4 list-disc space-y-1 pl-5">
+    <li>One-time plans provide full access for the purchased duration with no automatic renewal.</li>
+    <li>Recurring plans renew monthly and can be cancelled at any time.</li>
+    <li>All prices are in Canadian dollars (CAD) and are subject to change.</li>
+    <li>Payments are processed securely via Stripe. We do not store your card details.</li>
+    <li>Access expires at the end of the purchased period.</li>
+  </ul>
+</Section>
 
           <Section title="6. No Refund Policy">
             <p>

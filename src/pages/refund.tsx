@@ -29,7 +29,7 @@ export default function RefundPolicy({ onBack }: { onBack: () => void }) {
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm md:p-12">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Refund Policy</h1>
           <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: March 2026</p>
-          <p className="mt-1 text-sm text-slate-500">CLBPrep (operated by Soheila Azizi) — Halifax, Nova Scotia, Canada</p>
+          <p className="mt-1 text-sm text-slate-500">CLBPrep, operated by Azizi Online Learning Services — Halifax, Nova Scotia, Canada</p>
 
           <hr className="my-6 border-slate-100" />
 

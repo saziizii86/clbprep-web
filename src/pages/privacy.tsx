@@ -29,13 +29,13 @@ export default function PrivacyPolicy({ onBack }: { onBack: () => void }) {
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm md:p-12">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Privacy Policy</h1>
           <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: March 2026</p>
-          <p className="mt-1 text-sm text-slate-500">CLBPrep (operated by Soheila Azizi) — Halifax, Nova Scotia, Canada</p>
+          <p className="mt-1 text-sm text-slate-500">CLBPrep, operated by Azizi Online Learning Services — Halifax, Nova Scotia, Canada</p>
 
           <hr className="my-6 border-slate-100" />
 
           <Section title="1. Who We Are">
             <p>
-              CLBPrep is an online study platform operated by Soheila Azizi as a sole proprietorship based in Halifax,
+              CLBPrep is an online study platform operated by Azizi Online Learning Services, based in Halifax,
               Nova Scotia, Canada. We provide preparation tools and practice materials for the CELPIP exam.
               This Privacy Policy explains what personal information we collect, how we use it, and your
               rights regarding that information.

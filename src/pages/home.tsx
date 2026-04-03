@@ -804,7 +804,7 @@ function SiteFooter({
           </div>
 
           <div className="mt-6 border-t border-white/15 pt-4 text-center text-[11px] text-white/70">
-            © {new Date().getFullYear()} CLBPrep. All rights reserved. CLBPrep is an independent study platform and is not affiliated with, endorsed by, or connected to Paragon Testing Enterprises or CELPIP..
+            © {new Date().getFullYear()} CLBPrep, operated by Azizi Online Learning Services. All rights reserved. CLBPrep is an independent study platform and is not affiliated with, endorsed by, or connected to Paragon Testing Enterprises or CELPIP.
           </div>
         </div>
       </div>

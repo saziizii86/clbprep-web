@@ -637,7 +637,7 @@ setMediaError('');
   // Render constants
   const SHELL_BASE =
     'bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl mx-auto';
-  const SHELL_FIXED = 'h-[calc(100dvh-7rem)] max-h-[720px] flex flex-col overflow-hidden';
+  const SHELL_FIXED = 'h-[calc(100dvh-7rem)] landscape:h-[calc(100dvh-1.5rem)] max-h-[720px] flex flex-col overflow-hidden';
   const SHELL_COMPACT = 'min-h-[500px] max-h-[620px] flex flex-col overflow-hidden';
   const SHELL_PAD = 'p-4 sm:p-6';
 
@@ -700,23 +700,75 @@ setMediaError('');
     </div>
   );
 
-  const renderMedia = () => (
+const renderMedia = () => (
     <div className={`${SHELL_BASE} ${SHELL_FIXED} ${SHELL_PAD}`}>
-      {/* Title */}
-      <div className="text-center mb-3 sm:mb-4 flex-shrink-0">
+
+      {/* Title — hidden in landscape to reclaim vertical space */}
+      <div className="text-center mb-3 sm:mb-4 flex-shrink-0 landscape:hidden">
         <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
           {hasVideo ? 'Watch the Discussion' : 'Listen to the Discussion'}
         </h2>
         <p className="text-slate-500 mt-1 text-sm sm:text-base line-clamp-2">{instructionsText}</p>
       </div>
 
-      {/* Video */}
-      {hasVideo && (
-        <div className="flex-1 min-h-0 mb-3 relative">
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            className="w-full h-full object-contain rounded-2xl bg-black"
+      {/* Inner layout: column on portrait, row on landscape */}
+      <div className="flex-1 min-h-0 flex flex-col landscape:flex-row gap-3">
+
+        {/* ── LEFT / TOP: Video ── */}
+        {hasVideo && (
+          <div className="flex-1 min-h-0 landscape:flex-[3] relative">
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              className="w-full h-full object-contain rounded-2xl bg-black"
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onCanPlay={() => {
+                if (phase === 'media' && pendingAutoplay) {
+                  void attemptMediaAutoplay();
+                }
+              }}
+              onPlay={() => {
+                setIsPlaying(true);
+                setShowIOSStartOverlay(false);
+                setMediaError('');
+              }}
+              onPause={() => setIsPlaying(false)}
+              onEnded={handleMediaEnded}
+              onError={(e) => {
+                const videoEl = e.currentTarget;
+                console.error('[ListeningDiscussionTest] Video error:', videoEl.error, videoUrl);
+                setIsPlaying(false);
+                setPendingAutoplay(false);
+                setMediaError(
+                  'This video could not be played on this device. Please upload MP4 (H.264 + AAC).'
+                );
+              }}
+              playsInline
+              autoPlay
+              preload="auto"
+              controls={false}
+            />
+
+            {showIOSStartOverlay && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/45">
+                <button
+                  type="button"
+                  onClick={handleIOSStartPlayback}
+                  className="px-5 py-3 rounded-2xl bg-white text-slate-900 font-semibold shadow-xl hover:bg-slate-100 transition"
+                >
+                  Tap to start video
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Audio fallback (no video) */}
+        {!hasVideo && hasAudio && (
+          <audio
+            ref={audioRef}
+            src={audioUrl}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onCanPlay={() => {
@@ -724,144 +776,106 @@ setMediaError('');
                 void attemptMediaAutoplay();
               }
             }}
-            onPlay={() => {
-  setIsPlaying(true);
-  setShowIOSStartOverlay(false);
-  setMediaError('');
-}}
+            onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onEnded={handleMediaEnded}
             onError={(e) => {
-              const videoEl = e.currentTarget;
-              console.error('[ListeningDiscussionTest] Video error:', videoEl.error, videoUrl);
+              const audioEl = e.currentTarget;
+              console.error('[ListeningDiscussionTest] Audio error:', audioEl.error, audioUrl);
               setIsPlaying(false);
               setPendingAutoplay(false);
-              setMediaError(
-                'This video could not be played on this device. Please upload MP4 (H.264 + AAC).'
-              );
+              setMediaError('This audio could not be played on this device.');
             }}
-            playsInline
             autoPlay
             preload="auto"
-            controls={false}
           />
-		  
-		  {showIOSStartOverlay && (
-  <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/45">
-    <button
-      type="button"
-      onClick={handleIOSStartPlayback}
-      className="px-5 py-3 rounded-2xl bg-white text-slate-900 font-semibold shadow-xl hover:bg-slate-100 transition"
-    >
-      Tap to start video
-    </button>
-  </div>
-)}
-        </div>
-      )}
+        )}
 
-      {/* Audio fallback */}
-      {!hasVideo && hasAudio && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
-          onCanPlay={() => {
-            if (phase === 'media' && pendingAutoplay) {
-              void attemptMediaAutoplay();
-            }
-          }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={handleMediaEnded}
-          onError={(e) => {
-            const audioEl = e.currentTarget;
-            console.error('[ListeningDiscussionTest] Audio error:', audioEl.error, audioUrl);
-            setIsPlaying(false);
-            setPendingAutoplay(false);
-            setMediaError('This audio could not be played on this device.');
-          }}
-          autoPlay
-          preload="auto"
-        />
-      )}
+        {/* ── RIGHT / BOTTOM: Controls ── */}
+        <div className="flex-shrink-0 landscape:flex-[2] flex flex-col justify-end landscape:justify-center gap-2">
 
-      {mediaError && (
-        <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {mediaError}
-        </div>
-      )}
-
-      {/* Play Controls */}
-      <div className="flex items-center gap-3 sm:gap-4 mb-3 flex-shrink-0">
-        <button
-          onClick={togglePlayPause}
-          disabled={hasPlayedMedia}
-          className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex-shrink-0 flex items-center justify-center transition-all ${
-            hasPlayedMedia
-              ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-              : 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white hover:shadow-xl hover:shadow-blue-500/25'
-          }`}
-        >
-          {isPlaying ? (
-            <Pause className="w-5 h-5 sm:w-6 sm:h-6" />
-          ) : (
-            <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-0.5" />
+          {mediaError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {mediaError}
+            </div>
           )}
-        </button>
 
-        <div className="flex-1 flex items-center gap-2 sm:gap-3">
-          <span className="text-sm text-slate-500 font-mono w-10 sm:w-12 flex-shrink-0">
-            {formatTime(Math.floor(mediaCurrentTime))}
-          </span>
-
-          <div className="flex-1">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={0.1}
-              value={mediaProgress}
-              onChange={(e) => seekToPercent(Number(e.target.value))}
-              className="w-full accent-indigo-600"
-              aria-label={hasVideo ? 'Video progress' : 'Audio progress'}
+          {/* Play Controls */}
+          <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
+            <button
+              onClick={togglePlayPause}
               disabled={hasPlayedMedia}
-            />
+              className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex-shrink-0 flex items-center justify-center transition-all ${
+                hasPlayedMedia
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white hover:shadow-xl hover:shadow-blue-500/25'
+              }`}
+            >
+              {isPlaying ? (
+                <Pause className="w-5 h-5 sm:w-6 sm:h-6" />
+              ) : (
+                <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-0.5" />
+              )}
+            </button>
+
+            <div className="flex-1 flex items-center gap-2 sm:gap-3">
+              <span className="text-sm text-slate-500 font-mono w-10 sm:w-12 flex-shrink-0">
+                {formatTime(Math.floor(mediaCurrentTime))}
+              </span>
+
+              <div className="flex-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={mediaProgress}
+                  onChange={(e) => seekToPercent(Number(e.target.value))}
+                  className="w-full accent-indigo-600"
+                  aria-label={hasVideo ? 'Video progress' : 'Audio progress'}
+                  disabled={hasPlayedMedia}
+                />
+              </div>
+
+              <span className="text-sm text-slate-500 font-mono w-10 sm:w-12 flex-shrink-0">
+                {formatTime(mediaDuration)}
+              </span>
+            </div>
           </div>
 
-          <span className="text-sm text-slate-500 font-mono w-10 sm:w-12 flex-shrink-0">
-            {formatTime(mediaDuration)}
-          </span>
+          {/* Transcript button */}
+          <button
+            onClick={() => setShowTranscript(true)}
+            className="w-full py-2.5 sm:py-3 border-2 border-slate-200 rounded-xl text-slate-700 font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all flex-shrink-0"
+          >
+            Show Transcript
+          </button>
+
+          {/* Nav buttons */}
+          <div className="flex gap-3 sm:gap-4 flex-shrink-0">
+            <button
+              onClick={handleBack}
+              className="flex-1 py-3 sm:py-4 bg-slate-100 text-slate-700 rounded-2xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Back
+            </button>
+
+            <button
+              onClick={handleNext}
+              className="flex-1 py-3 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-semibold hover:shadow-xl hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-3"
+            >
+              Skip to Questions
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          </div>
+
         </div>
+        {/* end controls side */}
+
       </div>
+      {/* end inner layout */}
 
-      {/* Transcript button */}
-      <button
-        onClick={() => setShowTranscript(true)}
-        className="w-full py-2.5 sm:py-3 border-2 border-slate-200 rounded-xl text-slate-700 font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all mb-3 flex-shrink-0"
-      >
-        Show Transcript
-      </button>
-
-      {/* Nav buttons */}
-      <div className="flex gap-3 sm:gap-4 flex-shrink-0">
-        <button
-          onClick={handleBack}
-          className="flex-1 py-3 sm:py-4 bg-slate-100 text-slate-700 rounded-2xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          Back
-        </button>
-
-        <button
-          onClick={handleNext}
-          className="flex-1 py-3 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-semibold hover:shadow-xl hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-3"
-        >
-          Skip to Questions
-          <ArrowRight className="w-5 h-5" />
-        </button>
-      </div>
     </div>
   );
 

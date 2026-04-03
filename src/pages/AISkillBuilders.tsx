@@ -3759,15 +3759,7 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
                   Practice English freely with personalized AI coaching. Pick a builder, configure your session, and start learning with live AI feedback.
                 </p>
               </div>
-              {userId && (
-                <button
-                  onClick={() => { setShowHistory(true); loadHistory(); }}
-                  className="self-start shrink-0 flex items-center gap-2 bg-white/15 hover:bg-white/25 border border-white/20 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition"
-                >
-                  <History className="w-4 h-4" />
-                  My History
-                </button>
-              )}
+
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               {[{ icon: Target, text: "Personalized to your level" }, { icon: Zap, text: "Instant AI feedback" }, { icon: FlaskConical, text: "Learn · Practice · Exam modes" }].map((item) => (

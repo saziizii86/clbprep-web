@@ -2608,6 +2608,37 @@ const planLabels: Record<string, string> = {
   </div>
 </div>
 
+{/* AI Skill Games Banner */}
+<div className="bg-gradient-to-r from-fuchsia-600 via-violet-600 to-purple-700 rounded-xl p-4 text-white shadow-lg">
+  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="flex-1">
+      <div className="flex items-center gap-2 mb-1">
+        <Gamepad2 className="w-5 h-5" />
+        <h3 className="text-xl font-bold">AI Skill Games</h3>
+      </div>
+      <p className="text-white/90 text-sm mb-2">
+        Learn English through fun, interactive games — AI-generated content every session
+      </p>
+      <div className="flex flex-wrap gap-3 text-xs">
+        {["🔤 Word Search", "🃏 Matching", "🎧 Listening", "💬 Dialogue"].map((item) => (
+          <span key={item} className="bg-white/20 rounded-full px-3 py-1 font-medium">
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+    <div className="sm:ml-6 shrink-0">
+      <button
+        onClick={() => setActiveTab("skill-games")}
+        className="w-full sm:w-auto px-5 py-3 bg-white text-violet-600 rounded-lg font-semibold hover:bg-violet-50 transition shadow-lg flex items-center justify-center gap-2"
+      >
+        <Gamepad2 className="w-5 h-5" />
+        Play Games
+      </button>
+    </div>
+  </div>
+</div>
+
       {/* All Skills with Subsections — one unified grid, header + tasks per column */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-4">Practice by Skill</h3>

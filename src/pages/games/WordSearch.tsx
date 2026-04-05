@@ -209,7 +209,7 @@ Return ONLY a JSON array of strings: ["WORD1","WORD2",...]`;
                 const key = `${r}-${c}`;
                 return (
                   <button key={key} onClick={() => handleClick(key)} onMouseEnter={() => handleHover(key)}
-                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded text-[10px] sm:text-xs font-bold transition flex items-center justify-center
+                    className={`w-9 h-9 sm:w-10 sm:h-10 rounded text-xs sm:text-sm font-bold transition flex items-center justify-center
                       ${revealedCells[key] ? REVEAL_COLOR : foundCells[key] ? foundCells[key] : startCell===key ? "bg-blue-500 text-white" : hoveredCells.includes(key) ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100 text-gray-700"}`}>
                     {letter}
                   </button>
@@ -217,14 +217,14 @@ Return ONLY a JSON array of strings: ["WORD1","WORD2",...]`;
               }))}
             </div>
           </div>
-          <div className="flex flex-col gap-3 lg:w-52 shrink-0">
+          <div className="flex flex-col gap-3 lg:w-60 shrink-0">
             <div className="bg-white rounded-2xl border border-blue-200 p-4 shadow-sm flex-1">
               <h3 className="font-semibold text-gray-700 text-sm mb-3">Find these words:</h3>
               <ul className="space-y-1.5">
                 {words.map((w, i) => {
                   const isFound = foundWords.includes(w), isRev = !isFound && revealed;
                   return (
-                    <li key={w} className={`text-xs font-medium px-2 py-1 rounded-lg transition ${isFound?`${FOUND_COLORS[i%FOUND_COLORS.length]} line-through opacity-70`:isRev?"text-gray-400 line-through bg-gray-100":"text-gray-700"}`}>
+                    <li key={w} className={`text-sm font-medium px-2 py-1.5 rounded-lg transition ${isFound?`${FOUND_COLORS[i%FOUND_COLORS.length]} line-through opacity-70`:isRev?"text-gray-400 line-through bg-gray-100":"text-gray-700"}`}>
                       {isFound?"✓ ":isRev?"👁 ":`${i+1}. `}{w}
                     </li>
                   );

@@ -1,7 +1,8 @@
 // src/pages/games/WordSearch.tsx
-import React, { useState, useCallback, useEffect } from "react";
-import { ArrowLeft, RefreshCw, Trophy, Clock, CheckCircle2, Eye, Loader2 } from "lucide-react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { ArrowLeft, RefreshCw, Trophy, Clock, CheckCircle2, Eye, Loader2, Volume2, BookOpen } from "lucide-react";
 import { generateGameContent } from "./gameAI";
+import { getAPISettings } from "../../services/settingsService";
 
 interface GameConfig { topic: string; difficulty: string; duration: number; }
 interface Props { config: GameConfig; onBack: () => void; }
@@ -88,21 +89,47 @@ function WordSearchInner({ config, onBack, onReset }: { config: GameConfig; onBa
   const [gameOver, setGameOver] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [wordInfo, setWordInfo] = useState<Record<string, { meaning: string; example: string }>>({});
+  const [infoTab, setInfoTab] = useState<"meaning"|"example">("meaning");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     async function load() {
       const diff = config.difficulty, topic = config.topic;
-      const prompt = `Generate exactly ${count + 5} unique English vocabulary words related to "${topic}" at ${diff} level (${CLB[diff]}).
-Rules: ALL UPPERCASE, no spaces, 4-12 letters each, no duplicates, avoid the most obvious/common examples.
-Return ONLY a JSON array of strings: ["WORD1","WORD2",...]`;
-      const generated = await generateGameContent<string[]>(prompt, staticFallback);
-      // Ensure uppercase and valid length
-      const cleaned = generated.map(w => String(w).toUpperCase().replace(/[^A-Z]/g, "")).filter(w => w.length >= 4 && w.length <= 12);
-      const final = shuffle(cleaned.length >= count ? cleaned : staticFallback).slice(0, count);
-      const { grid: g, placements: p } = buildGrid(final);
-      setWords(final);
+
+      // ONE combined call: words + meanings + examples together
+      const prompt = `Generate exactly ${count} unique English vocabulary words related to "${topic}" at ${diff} level (${CLB[diff]}).
+For each word include a brief meaning (max 6 words) and one short natural example sentence.
+Rules: ALL UPPERCASE, no spaces in words, 4-12 letters, no duplicates.
+Return ONLY a JSON array: [{"word":"COMMUTE","meaning":"travel to work daily","example":"She commutes to work by train every morning."}]`;
+
+      const generated = await generateGameContent<Array<{word:string;meaning:string;example:string}>>(prompt, []);
+
+      // Extract valid words
+      const validItems = generated.filter(item => {
+        const w = String(item?.word||"").toUpperCase().replace(/[^A-Z]/g,"");
+        return w.length >= 4 && w.length <= 12;
+      });
+
+      const wordList = validItems.length >= count
+        ? validItems.map(item => String(item.word).toUpperCase().replace(/[^A-Z]/g,"")).slice(0, count)
+        : shuffle(staticFallback).slice(0, count);
+
+      // Build info map from the same response
+      const infoMap: Record<string, {meaning:string;example:string}> = {};
+      validItems.forEach(item => {
+        const w = String(item.word||"").toUpperCase().replace(/[^A-Z]/g,"");
+        if (w && item.meaning) infoMap[w] = { meaning: item.meaning, example: item.example||"" };
+      });
+
+      const { grid: g, placements: p } = buildGrid(wordList);
+      setWords(wordList);
       setGrid(g);
       setPlacements(p);
+      setWordInfo(infoMap);
       setIsGenerating(false);
     }
     load();
@@ -118,6 +145,64 @@ Return ONLY a JSON array of strings: ["WORD1","WORD2",...]`;
   useEffect(() => {
     if (foundWords.length === words.length && words.length > 0) setGameOver(true);
   }, [foundWords, words.length]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; audioRef.current = null; }
+      if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+    };
+  }, []);
+
+  const speakWord = useCallback(async (word: string) => {
+    // Stop any current audio
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; audioRef.current = null; }
+    if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(true);
+
+    try {
+      const settings = await getAPISettings();
+      const apiKey: string = settings?.openAIKey || settings?.key || settings?.apiKey || "";
+      if (apiKey) {
+        const res = await fetch("https://api.openai.com/v1/audio/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "tts-1-hd", input: word.toLowerCase(), voice: "shimmer", speed: 0.85 }),
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          blobUrlRef.current = url;
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          audio.onended = () => setIsSpeaking(false);
+          audio.onerror = () => setIsSpeaking(false);
+          audio.play();
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // Browser TTS fallback
+    const utter = new SpeechSynthesisUtterance(word.toLowerCase());
+    utter.lang = "en-CA"; utter.rate = 0.85;
+    utter.onend = () => setIsSpeaking(false);
+    utter.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utter);
+  }, []);
+
+  // On-demand info loader — fetches meaning + example for any word not already in map
+  const loadWordInfo = useCallback(async (word: string) => {
+    if (wordInfo[word]) return; // already loaded
+    try {
+      const prompt = `For the English word "${word}", provide a brief meaning (max 6 words) and one short natural example sentence.
+Return ONLY a JSON array with one item: [{"word":"${word}","meaning":"brief definition","example":"A short natural sentence."}]`;
+      const result = await generateGameContent<Array<{word:string;meaning:string;example:string}>>(prompt, []);
+      if (result.length > 0 && result[0].meaning) {
+        setWordInfo(prev => ({ ...prev, [word]: { meaning: result[0].meaning, example: result[0].example || "" } }));
+      }
+    } catch (_) {}
+  }, [wordInfo]);
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -217,20 +302,70 @@ Return ONLY a JSON array of strings: ["WORD1","WORD2",...]`;
               }))}
             </div>
           </div>
-          <div className="flex flex-col gap-3 lg:w-60 shrink-0">
+          <div className="flex flex-col gap-3 lg:w-64 shrink-0">
             <div className="bg-white rounded-2xl border border-blue-200 p-4 shadow-sm flex-1">
               <h3 className="font-semibold text-gray-700 text-sm mb-3">Find these words:</h3>
               <ul className="space-y-1.5">
                 {words.map((w, i) => {
                   const isFound = foundWords.includes(w), isRev = !isFound && revealed;
+                  const isSelected = selectedWord === w;
                   return (
-                    <li key={w} className={`text-sm font-medium px-2 py-1.5 rounded-lg transition ${isFound?`${FOUND_COLORS[i%FOUND_COLORS.length]} line-through opacity-70`:isRev?"text-gray-400 line-through bg-gray-100":"text-gray-700"}`}>
-                      {isFound?"✓ ":isRev?"👁 ":`${i+1}. `}{w}
+                    <li key={w}
+                      className={`text-sm font-medium px-2 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-between gap-1
+                        ${isSelected ? "ring-2 ring-blue-400" : ""}
+                        ${isFound?`${FOUND_COLORS[i%FOUND_COLORS.length]} line-through opacity-70`:isRev?"text-gray-400 line-through bg-gray-100":"text-gray-700 hover:bg-blue-50"}`}
+                      onClick={() => { setSelectedWord(w); setInfoTab("meaning"); speakWord(w); loadWordInfo(w); }}>
+                      <span>{isFound?"✓ ":isRev?"👁 ":`${i+1}. `}{w}</span>
+                      <Volume2 className={`w-3.5 h-3.5 shrink-0 ${isSelected && isSpeaking ? "text-blue-500 animate-pulse" : "text-gray-300"}`} />
                     </li>
                   );
                 })}
               </ul>
             </div>
+
+            {/* Word info panel with tabs */}
+            {selectedWord && (
+              <div className="bg-white rounded-2xl border border-blue-200 shadow-sm overflow-hidden">
+                {/* Word header + Hear it */}
+                <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-b border-blue-100">
+                  <span className="text-base font-black text-blue-700">{selectedWord}</span>
+                  <button onClick={() => speakWord(selectedWord)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition
+                      ${isSpeaking ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-white text-blue-600 border-blue-200 hover:bg-blue-50"}`}>
+                    <Volume2 className={`w-3.5 h-3.5 ${isSpeaking ? "animate-pulse" : ""}`}/>
+                    {isSpeaking ? "Playing…" : "Hear it"}
+                  </button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-gray-100">
+                  <button onClick={() => setInfoTab("meaning")}
+                    className={`flex-1 py-2 text-sm font-semibold transition border-b-2
+                      ${infoTab==="meaning" ? "text-blue-600 border-blue-500 bg-blue-50" : "text-gray-400 border-transparent hover:text-gray-600"}`}>
+                    📖 Meaning
+                  </button>
+                  <button onClick={() => setInfoTab("example")}
+                    className={`flex-1 py-2 text-sm font-semibold transition border-b-2
+                      ${infoTab==="example" ? "text-blue-600 border-blue-500 bg-blue-50" : "text-gray-400 border-transparent hover:text-gray-600"}`}>
+                    💬 Example
+                  </button>
+                </div>
+
+                {/* Tab content */}
+                <div className="px-4 py-3 min-h-[54px]">
+                  {wordInfo[selectedWord] ? (
+                    infoTab === "meaning"
+                      ? <p className="text-sm text-gray-700 leading-relaxed">{wordInfo[selectedWord].meaning}</p>
+                      : <p className="text-sm text-gray-600 italic leading-relaxed">"{wordInfo[selectedWord].example}"</p>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-gray-400 py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin"/>Loading…
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <button onClick={handleReveal} disabled={revealed} className="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 flex items-center justify-center gap-2 disabled:opacity-40"><Eye className="w-4 h-4"/>Check Answer</button>
             <button onClick={onReset} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4"/>New Words</button>
           </div>

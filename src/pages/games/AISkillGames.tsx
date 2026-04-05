@@ -1,5 +1,5 @@
 // src/pages/games/AISkillGames.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ArrowLeft, Gamepad2, Search, Layers, AlignLeft,
   PenLine, Headphones, MessageSquare, Trophy, Star, Zap,
@@ -12,7 +12,7 @@ import FillInTheBlank from "./FillInTheBlank";
 import ListeningPuzzle from "./ListeningPuzzle";
 import DialogueCompletion from "./DialogueCompletion";
 
-interface GameConfig { topic: string; difficulty: string; duration: number; }
+interface GameConfig { topic: string; difficulty: string; duration: number | null; }
 
 const TOPIC_ICONS: Record<string, string> = {
   "Daily Life": "🏠", "Work": "💼", "Travel": "✈️", "Education": "📚",
@@ -37,11 +37,16 @@ interface Props { onBack: () => void; }
 
 export default function AISkillGames({ onBack }: Props) {
   const [selectedGame, setSelectedGame] = useState<typeof GAMES[0] | null>(null);
-  const [gameConfig, setGameConfig] = useState<GameConfig>({ topic: "Daily Life", difficulty: "intermediate", duration: 10 });
+  const [gameConfig, setGameConfig] = useState<GameConfig>({ topic: "", difficulty: "", duration: null });
   const [gameStarted, setGameStarted] = useState(false);
 
+  // Scroll to top whenever the screen changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, [selectedGame, gameStarted]);
+
   if (gameStarted && selectedGame) {
-    const p = { config: gameConfig, onBack: () => { setGameStarted(false); setSelectedGame(null); } };
+    const p = { config: { ...gameConfig, duration: gameConfig.duration ?? 10 }, onBack: () => { setGameStarted(false); setSelectedGame(null); } };
     return (
       <div className="min-h-screen bg-gray-50">
         {selectedGame.id === "word-search"      && <WordSearch {...p} />}
@@ -57,7 +62,7 @@ export default function AISkillGames({ onBack }: Props) {
   if (selectedGame) {
     return (
       <div className="min-h-screen bg-gray-50 pb-12">
-        <button onClick={() => setSelectedGame(null)} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 transition px-6 py-4 text-sm font-medium">
+        <button onClick={() => { setSelectedGame(null); window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); }} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 transition px-6 py-4 text-sm font-medium">
           <ArrowLeft className="w-4 h-4" /> Back to AI Skill Games
         </button>
 
@@ -133,8 +138,14 @@ export default function AISkillGames({ onBack }: Props) {
         </div>
 
         <div className="px-4 sm:px-6 mt-6">
-          <button onClick={() => setGameStarted(true)}
-            className={`w-full py-4 rounded-2xl font-bold text-white text-lg shadow-lg transition hover:opacity-90 flex items-center justify-center gap-3 ${
+          {(!gameConfig.topic || !gameConfig.difficulty || !gameConfig.duration) && (
+            <p className="text-center text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-xl py-2.5 mb-3 font-medium">
+              {!gameConfig.topic ? "⬆️ Please choose a topic" : !gameConfig.difficulty ? "⬆️ Please choose a difficulty" : "⬆️ Please choose a session length"}
+            </p>
+          )}
+          <button onClick={() => { window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); setGameStarted(true); }}
+            disabled={!gameConfig.topic || !gameConfig.difficulty || !gameConfig.duration}
+            className={`w-full py-4 rounded-2xl font-bold text-white text-lg shadow-lg transition hover:opacity-90 flex items-center justify-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed ${
               selectedGame.id === "word-search" ? "bg-blue-600" : selectedGame.id === "matching" ? "bg-purple-600" :
               selectedGame.id === "sentence-builder" ? "bg-green-600" : selectedGame.id === "fill-blank" ? "bg-orange-500" :
               selectedGame.id === "listening-puzzle" ? "bg-teal-600" : "bg-rose-500"}`}>
@@ -172,7 +183,7 @@ export default function AISkillGames({ onBack }: Props) {
         <h2 className="text-lg font-bold text-gray-800 mb-4">Choose a Game</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {GAMES.map((game) => (
-            <button key={game.id} onClick={() => setSelectedGame(game)}
+            <button key={game.id} onClick={() => { setSelectedGame(game); setGameConfig({ topic: "", difficulty: "", duration: null }); window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); }}
               className={`bg-white border ${game.borderColor} rounded-2xl p-5 text-left hover:shadow-md transition group cursor-pointer`}>
               <div className="flex items-start gap-4">
                 <div className={`w-12 h-12 rounded-xl ${game.bgColor} flex items-center justify-center ${game.color} shrink-0`}>

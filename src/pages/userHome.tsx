@@ -4057,6 +4057,11 @@ const handleDeleteAccount = async () => {
 
   try {
     const me = await account.get();
+	
+	 // ✅ ADD THIS: delete the Users collection document first
+    if (userRowId) {
+      await databases.deleteDocument(DATABASE_ID, USERS_COLLECTION_ID, userRowId);
+    }
 
     const execution = await functions.createExecution(
       DELETE_ACCOUNT_FUNCTION_ID,

@@ -76,7 +76,8 @@ import { getDashboardStats, getUserResultsParsed } from '../services/userResults
 
 import AISkillBuilders from "./AISkillBuilders";
 import { Brain } from "lucide-react"; // Brain icon for sidebar
-
+import AISkillGames from "./games/AISkillGames";
+import { Gamepad2 } from "lucide-react";
 
 export default function CelpipPracticeDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -1868,6 +1869,7 @@ const handleSaveSettings = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'mock-exams', label: 'Mock Exams', icon: FileText },
     { id: 'skill-builders', label: 'AI Skill Builders', icon: Brain },
+	{ id: 'skill-games', label: 'AI Skill Games', icon: Gamepad2 },
   ].map(item => (
     <button
       key={item.id}
@@ -4687,6 +4689,13 @@ onClick={() => {
     isProMember={isProMember}  // keep this — AI users are still "pro" for this section
     openUpgradeModal={openUpgradeModal}
     userId={userRowId ?? undefined}
+    onBack={() => {
+      setActiveTab("dashboard");
+      setCurrentView("dashboard");
+    }}
+  />
+  ) : activeTab === "skill-games" ? (
+  <AISkillGames
     onBack={() => {
       setActiveTab("dashboard");
       setCurrentView("dashboard");

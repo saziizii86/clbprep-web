@@ -11,7 +11,7 @@ interface Dialogue { title: string; context: string; lines: DialogueLine[]; }
 
 function shuffle<T>(a: T[]): T[] { return [...a].sort(() => Math.random() - 0.5); }
 
-const ALL_DIALOGUES: Record<string, Record<string, Dialogue[]>> = {
+const _PLACEHOLDER = {
   "Daily Life": {
     beginner: [
       { title:"Asking a Neighbour for Help", context:"Two neighbours are talking in the hallway.", lines:[{speaker:"A",text:"Hi! Could you help me with something?"},{speaker:"B",text:"Sure! What do you need?"},{speaker:"A",text:"I need to carry some boxes upstairs.",isBlank:true,options:["Can you give me a hand?","Do you want to eat?","Are you going to work?","Can I borrow your car?"],correct:"Can you give me a hand?",explanation:"'Give me a hand' means to help someone."},{speaker:"B",text:"Of course! Happy to help."}]},
@@ -93,17 +93,6 @@ const ALL_DIALOGUES: Record<string, Record<string, Dialogue[]>> = {
   "Immigration": { beginner:[{title:"At the Border",context:"A traveller speaks to a border officer.",lines:[{speaker:"A",text:"Good morning. May I see your passport and travel documents?"},{speaker:"B",text:"Of course, here you are.",isBlank:true,options:["I'm visiting family for two weeks.","I want to stay forever.","I don't have documents.","I'm not sure why I'm here."],correct:"I'm visiting family for two weeks.",explanation:"A clear, honest, concise answer to the border officer's implicit purpose question."},{speaker:"A",text:"Thank you. Enjoy your stay."}]}], intermediate:[{title:"Settlement Worker Consultation",context:"A newcomer meets a settlement worker.",lines:[{speaker:"A",text:"I submitted my work permit application three months ago."},{speaker:"B",text:"Have you received any correspondence from them?",isBlank:true,options:["Not yet. Is there a way to check the status online?","Yes they called yesterday.","I never check my mail.","I withdrew the application."],correct:"Not yet. Is there a way to check the status online?",explanation:"Shows proactive problem-solving after providing the direct answer."},{speaker:"B",text:"Yes, track it through the government portal with your reference number."}]},{title:"Explaining Immigration Status",context:"A new employee completes HR paperwork.",lines:[{speaker:"A",text:"For your employment file, we'll need to verify your work authorization."},{speaker:"B",text:"Of course."},{speaker:"A",text:"Are you a Canadian citizen, permanent resident, or on a work permit?",isBlank:true,options:["I'm on an open work permit valid until December of next year. I can provide a copy of the document.","I'm not sure.","That's private information.","I have all kinds of papers."],correct:"I'm on an open work permit valid until December of next year. I can provide a copy of the document.",explanation:"Answers directly with key details (type + expiry) and offers documentation — professional and transparent."},{speaker:"A",text:"Perfect. Please send a copy to HR and we'll update your file."}]}], advanced:[{title:"Citizenship Application Interview",context:"A citizenship officer interviews an applicant.",lines:[{speaker:"A",text:"Can you tell us about your ties to the Canadian community?"},{speaker:"B",text:"Certainly.",isBlank:true,options:["Over the past four years I've volunteered regularly at a food bank, served on the board of a newcomer support organization, and mentored three recent immigrants through their settlement process.","I mainly stay home.","I pay my taxes.","I have friends who are Canadian."],correct:"Over the past four years I've volunteered regularly at a food bank, served on the board of a newcomer support organization, and mentored three recent immigrants through their settlement process.",explanation:"Three concrete, specific examples of increasing responsibility — demonstrates genuine civic commitment rather than generic claims."},{speaker:"A",text:"That reflects significant and varied community engagement. Thank you."}]},{title:"Humanitarian Case Presentation",context:"A refugee applicant meets with their legal representative.",lines:[{speaker:"A",text:"We need to build the strongest possible case before your hearing."},{speaker:"B",text:"I want to be completely honest about everything."},{speaker:"A",text:"That's exactly the right approach. The board needs to understand why return is not safe.",isBlank:true,options:["In addition to the documented threats I've described, I can provide witness statements, medical records of the injuries I sustained, and country condition reports from three credible international human rights organizations.","I'll just tell them my story.","I don't have any documents.","Can you just handle it?"],correct:"In addition to the documented threats I've described, I can provide witness statements, medical records of the injuries I sustained, and country condition reports from three credible international human rights organizations.",explanation:"Proactively identifies three distinct categories of evidence — demonstrates legal preparedness and seriousness of claim."},{speaker:"A",text:"Excellent. That corroborating evidence will significantly strengthen your application."}]}] },
 };
 
-function getDialogues(topic: string, difficulty: string, count: number): Dialogue[] {
-  const t = ALL_DIALOGUES[topic] || ALL_DIALOGUES["Daily Life"];
-  const pool = t[difficulty] || t["intermediate"] || t["beginner"] || t["advanced"] || [];
-  if (pool.length === 0) {
-    const fb = ALL_DIALOGUES["Daily Life"];
-    const fbPool = fb[difficulty] || fb["beginner"] || [];
-    return shuffle(fbPool).slice(0, Math.min(count, fbPool.length));
-  }
-  return shuffle(pool).slice(0, Math.min(count, pool.length));
-}
-
 const CLB_D: Record<string,string> = { beginner:"CLB 4-5", intermediate:"CLB 6-7", advanced:"CLB 8+" };
 const COMPLEXITY: Record<string,string> = {
   beginner: "simple everyday conversations with basic vocabulary",
@@ -112,9 +101,8 @@ const COMPLEXITY: Record<string,string> = {
 };
 
 function DialogueInner({ config, onBack, onReset }: { config: GameConfig; onBack:()=>void; onReset:()=>void }) {
-  const staticFallback = getDialogues(config.topic, config.difficulty, 4);
-
   const [isGenerating, setIsGenerating] = useState(true);
+  const [genError, setGenError] = useState(false);
   const [dialogues, setDialogues] = useState<Dialogue[]>([]);
   const [idx, setIdx] = useState(0);
   const [selected, setSelected] = useState<string|null>(null);
@@ -125,7 +113,9 @@ function DialogueInner({ config, onBack, onReset }: { config: GameConfig; onBack
 
   useEffect(() => {
     async function load() {
-      const prompt = `Generate exactly 5 dialogue completion exercises about "${config.topic}" at ${config.difficulty} level (${CLB_D[config.difficulty]}).
+      try {
+        const seed = Math.floor(Math.random() * 100000);
+        const prompt = `Generate exactly 5 dialogue completion exercises about "${config.topic}" at ${config.difficulty} level (${CLB_D[config.difficulty]}). Session seed: ${seed}.
 Complexity: ${COMPLEXITY[config.difficulty]}.
 Each dialogue has 3-5 exchanges (lines) between speakers A and B. One line must be marked isBlank:true with 4 options (only one is the best response).
 The correct answer should clearly fit better than the 3 distractors. Include a brief explanation.
@@ -134,14 +124,19 @@ Return ONLY a JSON array:
   {"speaker":"A","text":"..."},
   {"speaker":"B","text":"...","isBlank":true,"options":["Best response","Wrong 1","Wrong 2","Wrong 3"],"correct":"Best response","explanation":"Why this is best"}
 ]}]`;
-      const generated = await generateGameContent<Dialogue[]>(prompt, staticFallback);
-      const valid = generated.filter(d => {
-        if (!d?.title || !d?.lines || !Array.isArray(d.lines)) return false;
-        const blank = d.lines.find(l => l.isBlank);
-        return blank && blank.options?.length === 4 && blank.correct && blank.options.includes(blank.correct);
-      });
-      setDialogues(valid.length >= 2 ? valid.slice(0, 4) : staticFallback);
-      setIsGenerating(false);
+        const generated = await generateGameContent<Dialogue[]>(prompt, []);
+        const valid = generated.filter(d => {
+          if (!d?.title || !d?.lines || !Array.isArray(d.lines)) return false;
+          const blank = d.lines.find(l => l.isBlank);
+          return blank && blank.options?.length === 4 && blank.correct && blank.options.includes(blank.correct);
+        });
+        if (valid.length < 2) { setGenError(true); return; }
+        setDialogues(valid.slice(0, 4));
+      } catch {
+        setGenError(true);
+      } finally {
+        setIsGenerating(false);
+      }
     }
     load();
   }, []);
@@ -179,6 +174,19 @@ Return ONLY a JSON array:
         <div className="w-12 h-12 border-4 border-rose-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"/>
         <p className="text-gray-700 font-semibold">Generating AI dialogues…</p>
         <p className="text-gray-400 text-sm mt-1">Every session is unique!</p>
+      </div>
+    </div>
+  );
+
+  if (genError) return (
+    <div className="min-h-screen bg-rose-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl p-8 text-center shadow-lg max-w-xs w-full mx-4">
+        <p className="text-gray-700 font-semibold mb-2">Could not generate dialogues</p>
+        <p className="text-gray-400 text-sm mb-5">Please make sure an AI provider is connected in settings.</p>
+        <div className="flex gap-3">
+          <button onClick={onBack} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Back</button>
+          <button onClick={onReset} className="flex-1 py-2.5 rounded-xl bg-rose-500 text-white font-semibold text-sm flex items-center justify-center gap-1"><RefreshCw className="w-4 h-4"/>Retry</button>
+        </div>
       </div>
     </div>
   );

@@ -9,18 +9,6 @@ interface Props { config: GameConfig; onBack: () => void; }
 
 const GRID_SIZE = 14;
 
-const STATIC_WORDS: Record<string, string[]> = {
-  "Daily Life":    ["MORNING","COFFEE","SHOWER","GROCERY","COOKING","CLEANING","EVENING","LAUNDRY","COMMUTE","ROUTINE","BUDGET","LEISURE","APPLIANCE","NEIGHBOUR","CHORES","SCHEDULE","WEEKEND","ERRANDS","BEDTIME","RELAXING"],
-  "Work":          ["MEETING","PROJECT","DEADLINE","OFFICE","REPORT","SCHEDULE","MANAGER","BUDGET","CLIENT","INVOICE","AGENDA","PROPOSAL","TEAMWORK","STRATEGY","FEEDBACK","PROMOTION","CONTRACT","OVERTIME","WORKLOAD","NEGOTIATE"],
-  "Travel":        ["PASSPORT","LUGGAGE","AIRPORT","BOOKING","CUSTOMS","FLIGHT","HOTEL","TOURISM","TICKET","TRANSIT","ITINERARY","CURRENCY","LAYOVER","BOARDING","TERMINAL","DEPARTURE","ARRIVAL","VISA","TRAVEL","JOURNEY"],
-  "Education":     ["STUDENT","TEACHER","LIBRARY","READING","WRITING","GRAMMAR","LESSON","COURSE","SCHOOL","LECTURE","SEMESTER","THESIS","ENROLL","HOMEWORK","TEXTBOOK","RESEARCH","CAMPUS","DIPLOMA","TUITION","GRADUATE"],
-  "Health":        ["DOCTOR","MEDICINE","EXERCISE","HEALTHY","VITAMIN","HOSPITAL","FITNESS","CLINIC","THERAPY","WELLNESS","SYMPTOM","DIAGNOSIS","NUTRITION","RECOVERY","IMMUNITY","PHARMACY","VACCINE","PROTEIN","HYDRATION","CHECKUP"],
-  "Food & Cooking":["KITCHEN","RECIPE","COOKING","DINNER","BREAKFAST","DESSERT","PROTEIN","ORGANIC","BAKING","GRILLING","SIMMER","MARINATE","GARNISH","PORTION","CUISINE","INGREDIENT","APPETIZER","SEASONING","PASTRY","BRUNCH"],
-  "Shopping":      ["DISCOUNT","CHECKOUT","RECEIPT","PAYMENT","CASHIER","PRODUCT","BARGAIN","REFUND","VOUCHER","CUSTOMER","WARRANTY","WHOLESALE","RETAIL","EXCHANGE","DELIVERY","PURCHASE","BUDGET","INVOICE","SAVINGS","LOYALTY"],
-  "Technology":    ["COMPUTER","INTERNET","PASSWORD","DOWNLOAD","SOFTWARE","DATABASE","NETWORK","WIRELESS","DIGITAL","WEBSITE","BANDWIDTH","ENCRYPT","BROWSER","UPLOAD","FIREWALL","SERVER","STREAMING","SECURITY","STORAGE","UPGRADE"],
-  "Environment":   ["CLIMATE","RECYCLE","NATURAL","WILDLIFE","ORGANIC","CARBON","FOREST","ENERGY","PLANET","SUSTAIN","EMISSION","ECOSYSTEM","CONSERVE","POLLUTION","RENEWABLE","LANDFILL","COMPOST","HABITAT","OZONE","EROSION"],
-  "Immigration":   ["CITIZEN","RESIDENCY","PASSPORT","SPONSOR","REFUGEE","PERMIT","BORDER","LANDING","DOCUMENT","STATUS","NATURALIZE","APPLICANT","DEPENDENT","INTERVIEW","PERMANENT","SETTLEMENT","ARRIVAL","IDENTITY","COUNTRY","ASYLUM"],
-};
 
 const WORD_COUNT: Record<string, number> = { beginner: 8, intermediate: 10, advanced: 10 };
 const CLB: Record<string, string> = { beginner: "CLB 4-5", intermediate: "CLB 6-7", advanced: "CLB 8+" };
@@ -73,9 +61,9 @@ function getCells(word: string, p: Placement): string[] {
 
 function WordSearchInner({ config, onBack, onReset }: { config: GameConfig; onBack: () => void; onReset: () => void }) {
   const count = WORD_COUNT[config.difficulty] || 10;
-  const staticFallback = shuffle(STATIC_WORDS[config.topic] || STATIC_WORDS["Daily Life"]).slice(0, count);
 
   const [isGenerating, setIsGenerating] = useState(true);
+  const [genError, setGenError] = useState(false);
   const [words, setWords] = useState<string[]>([]);
   const [grid, setGrid] = useState<string[][]>([]);
   const [placements, setPlacements] = useState<Record<string, Placement>>({});
@@ -98,39 +86,41 @@ function WordSearchInner({ config, onBack, onReset }: { config: GameConfig; onBa
 
   useEffect(() => {
     async function load() {
-      const diff = config.difficulty, topic = config.topic;
-
-      // ONE combined call: words + meanings + examples together
-      const prompt = `Generate exactly ${count} unique English vocabulary words related to "${topic}" at ${diff} level (${CLB[diff]}).
+      try {
+        const diff = config.difficulty, topic = config.topic;
+        const seed = Math.floor(Math.random() * 100000);
+        const prompt = `Generate exactly ${count} unique English vocabulary words related to "${topic}" at ${diff} level (${CLB[diff]}). Session seed: ${seed}.
 For each word include a brief meaning (max 6 words) and one short natural example sentence.
 Rules: ALL UPPERCASE, no spaces in words, 4-12 letters, no duplicates.
 Return ONLY a JSON array: [{"word":"COMMUTE","meaning":"travel to work daily","example":"She commutes to work by train every morning."}]`;
 
-      const generated = await generateGameContent<Array<{word:string;meaning:string;example:string}>>(prompt, []);
+        const generated = await generateGameContent<Array<{word:string;meaning:string;example:string}>>(prompt, []);
 
-      // Extract valid words
-      const validItems = generated.filter(item => {
-        const w = String(item?.word||"").toUpperCase().replace(/[^A-Z]/g,"");
-        return w.length >= 4 && w.length <= 12;
-      });
+        const validItems = generated.filter(item => {
+          const w = String(item?.word||"").toUpperCase().replace(/[^A-Z]/g,"");
+          return w.length >= 4 && w.length <= 12;
+        });
 
-      const wordList = validItems.length >= count
-        ? validItems.map(item => String(item.word).toUpperCase().replace(/[^A-Z]/g,"")).slice(0, count)
-        : shuffle(staticFallback).slice(0, count);
+        if (validItems.length < count) { setGenError(true); return; }
 
-      // Build info map from the same response
-      const infoMap: Record<string, {meaning:string;example:string}> = {};
-      validItems.forEach(item => {
-        const w = String(item.word||"").toUpperCase().replace(/[^A-Z]/g,"");
-        if (w && item.meaning) infoMap[w] = { meaning: item.meaning, example: item.example||"" };
-      });
+        const wordList = validItems.map(item => String(item.word).toUpperCase().replace(/[^A-Z]/g,"")).slice(0, count);
 
-      const { grid: g, placements: p } = buildGrid(wordList);
-      setWords(wordList);
-      setGrid(g);
-      setPlacements(p);
-      setWordInfo(infoMap);
-      setIsGenerating(false);
+        const infoMap: Record<string, {meaning:string;example:string}> = {};
+        validItems.forEach(item => {
+          const w = String(item.word||"").toUpperCase().replace(/[^A-Z]/g,"");
+          if (w && item.meaning) infoMap[w] = { meaning: item.meaning, example: item.example||"" };
+        });
+
+        const { grid: g, placements: p } = buildGrid(wordList);
+        setWords(wordList);
+        setGrid(g);
+        setPlacements(p);
+        setWordInfo(infoMap);
+      } catch {
+        setGenError(true);
+      } finally {
+        setIsGenerating(false);
+      }
     }
     load();
   }, []);
@@ -251,6 +241,19 @@ Return ONLY a JSON array with one item: [{"word":"${word}","meaning":"brief defi
         <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4"/>
         <p className="text-gray-700 font-semibold">Generating AI word list…</p>
         <p className="text-gray-400 text-sm mt-1">Every session is unique!</p>
+      </div>
+    </div>
+  );
+
+  if (genError) return (
+    <div className="min-h-screen bg-blue-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl p-8 text-center shadow-lg max-w-xs w-full mx-4">
+        <p className="text-gray-700 font-semibold mb-2">Could not generate word list</p>
+        <p className="text-gray-400 text-sm mb-5">Please make sure an AI provider is connected in settings.</p>
+        <div className="flex gap-3">
+          <button onClick={onBack} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Back</button>
+          <button onClick={onReset} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-sm flex items-center justify-center gap-1"><RefreshCw className="w-4 h-4"/>Retry</button>
+        </div>
       </div>
     </div>
   );

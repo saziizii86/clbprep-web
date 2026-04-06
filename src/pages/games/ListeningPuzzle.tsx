@@ -11,7 +11,7 @@ interface Puzzle { sentence: string; words: string[]; hint: string; }
 // Most natural OpenAI voices — shimmer (female, clean) and onyx (male, clear)
 const VOICE_BY_GENDER: Record<"female"|"male", string> = {
   female: "shimmer", // Clean, clear female voice with minimal reverb
-  male:   "onyx",    // Deep, authoritative male voice — clear sound
+  male:   "echo",    // Clear, natural male voice — better for language learning
 };
 
 function shuffle<T>(a: T[]): T[] { return [...a].sort(() => Math.random() - 0.5); }
@@ -146,19 +146,13 @@ const ALL_PUZZLES: Record<string, Record<string, Puzzle[]>> = {
   "Immigration": { beginner:[{sentence:"I need to apply for a work permit.",words:["I","need","to","apply","for","a","work","permit"],hint:"immigration step"},{sentence:"She became a Canadian citizen after five years.",words:["She","became","a","Canadian","citizen","after","five","years"],hint:"citizenship milestone"}], intermediate:[{sentence:"You must provide all required documents with your permanent residency application.",words:["You","must","provide","all","required","documents","with","your","permanent","residency","application"],hint:"application process"},{sentence:"He sponsored his parents and they received their permanent residency within a year.",words:["He","sponsored","his","parents","and","they","received","their","permanent","residency","within","a","year"],hint:"family sponsorship"},{sentence:"The biometrics appointment is a mandatory step for all immigration applications.",words:["The","biometrics","appointment","is","a","mandatory","step","for","all","immigration","applications"],hint:"application requirement"}], advanced:[{sentence:"The applicant must demonstrate sufficient financial means to support their family members throughout the settlement period.",words:["The","applicant","must","demonstrate","sufficient","financial","means","to","support","their","family","members","throughout","the","settlement","period"],hint:"immigration requirement"},{sentence:"Successful integration into Canadian society requires both language proficiency and an understanding of cultural norms.",words:["Successful","integration","into","Canadian","society","requires","both","language","proficiency","and","an","understanding","of","cultural","norms"],hint:"settlement advice"}] },
 };
 
-function getPuzzles(topic: string, difficulty: string, count: number): Puzzle[] {
-  const t = ALL_PUZZLES[topic] || ALL_PUZZLES["Daily Life"];
-  const pool = t[difficulty] || t["beginner"];
-  return shuffle(pool).slice(0, Math.min(count, pool.length));
-}
 
 const CLB: Record<string,string> = { beginner:"CLB 4-5", intermediate:"CLB 6-7", advanced:"CLB 8+" };
 const WORDS_RANGE: Record<string,string> = { beginner:"5-8 words, simple vocabulary", intermediate:"8-13 words, varied tenses", advanced:"12-18 words, complex grammar" };
 
 function ListeningPuzzleInner({ config, onBack, onReset, voiceGender }: { config: GameConfig; onBack:()=>void; onReset:()=>void; voiceGender: "female"|"male" }) {
-  const staticFallback = getPuzzles(config.topic, config.difficulty, 5);
-
   const [isGenerating, setIsGenerating] = useState(true);
+  const [genError, setGenError] = useState(false);
   const [puzzles, setPuzzles] = useState<Puzzle[]>([]);
   const [idx, setIdx] = useState(0);
   const [wordPool, setWordPool] = useState<string[]>([]);
@@ -173,24 +167,32 @@ function ListeningPuzzleInner({ config, onBack, onReset, voiceGender }: { config
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      const prompt = `Generate exactly 7 natural English sentences about "${config.topic}" at ${config.difficulty} level (${CLB[config.difficulty]}) for a listening puzzle game.
-Rules: ${WORDS_RANGE[config.difficulty]}. Must sound completely natural when spoken aloud. Each sentence should be self-contained and meaningful.
-Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint":"morning routine"}]`;
+  const loadPuzzles = useCallback(async () => {
+    setIsGenerating(true);
+    setGenError(false);
+    try {
+      const seed = Math.floor(Math.random() * 100000);
+      const prompt = `Generate exactly 7 unique, varied English sentences about "${config.topic}" at ${config.difficulty} level (${CLB[config.difficulty]}) for a listening puzzle game. Session seed: ${seed}.
+Rules: ${WORDS_RANGE[config.difficulty]}. Must sound completely natural when spoken aloud. Each sentence must be different in structure and vocabulary — no repetition.
+Return ONLY a JSON array: [{"sentence":"She forgot to pay the electricity bill last month.","hint":"bills"}]`;
       const generated = await generateGameContent<Array<{sentence:string;hint:string}>>(prompt, []);
       const valid: Puzzle[] = generated.filter(s => s?.sentence && s?.hint).map(s => ({
         sentence: s.sentence,
         hint: s.hint,
         words: shuffle(s.sentence.replace(/[.!?]$/, "").split(" ").filter(Boolean)),
       }));
-      const final = valid.length >= 3 ? shuffle(valid).slice(0, 5) : staticFallback;
+      if (valid.length < 3) { setGenError(true); return; }
+      const final = shuffle(valid).slice(0, 5);
       setPuzzles(final);
       setWordPool(shuffle(final[0].words));
+    } catch {
+      setGenError(true);
+    } finally {
       setIsGenerating(false);
     }
-    load();
-  }, []);
+  }, [config.topic, config.difficulty]);
+
+  useEffect(() => { loadPuzzles(); }, []);
 
   const current = isGenerating ? null : puzzles[idx];
   const fmt = (s: number) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
@@ -230,8 +232,9 @@ Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint
 
     try {
       const settings = await getAPISettings();
-      // Use whatever key is stored — try OpenAI TTS directly; falls back if it fails
-      const apiKey: string = settings?.openAIKey || settings?.key || settings?.apiKey || settings?.openaiKey || "";
+      const provider: string = settings?.provider || "openai";
+      // Only use OpenAI TTS if the connected provider is OpenAI, or a dedicated openAIKey exists
+      const apiKey: string = settings?.openAIKey || (provider === "openai" ? (settings?.key || "") : "");
 
       if (apiKey) {
         if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
@@ -260,15 +263,23 @@ Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint
         return;
       }
     } catch (err) {
-      console.warn("OpenAI TTS failed, falling back to browser TTS:", err);
+      console.warn("OpenAI TTS failed:", err);
     }
 
-    // Fallback: browser TTS
+    // Fallback: browser TTS — pick the best available English voice
     setIsLoading(false);
-    if (!window.speechSynthesis) { setIsLoading(false); return; }
+    if (!window.speechSynthesis) { return; }
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => v.lang.startsWith("en") && v.localService && v.name.toLowerCase().includes("natural"))
+      || voices.find(v => v.lang.startsWith("en-CA"))
+      || voices.find(v => v.lang.startsWith("en-US") && v.localService)
+      || voices.find(v => v.lang.startsWith("en"));
     const utter = new SpeechSynthesisUtterance(current.sentence);
     utter.lang = "en-CA";
-    utter.rate = config.difficulty === "beginner" ? 0.8 : config.difficulty === "intermediate" ? 0.9 : 1.0;
+    if (preferred) utter.voice = preferred;
+    utter.rate = config.difficulty === "beginner" ? 0.85 : config.difficulty === "intermediate" ? 0.9 : 1.0;
+    utter.pitch = 1.0;
+    utter.volume = 1.0;
     utter.onstart = () => setIsSpeaking(true);
     utter.onend = () => { setIsSpeaking(false); };
     utter.onerror = () => setIsSpeaking(false);
@@ -289,7 +300,8 @@ Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint
 
   const check = () => {
     const ua = answer.join(" ");
-    const ok = ua.toLowerCase() === current.sentence.toLowerCase();
+    const normalized = (s: string) => s.toLowerCase().replace(/[.!?,]+$/, "").trim();
+    const ok = normalized(ua) === normalized(current.sentence);
     setFeedback(ok ? "correct" : "wrong");
     if (ok) setScore(s => s + 1);
   };
@@ -307,6 +319,10 @@ Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint
 
 
 
+  useEffect(() => {
+    if (gameOver) stopAudio();
+  }, [gameOver]);
+
   if (isGenerating) return (
     <div className="min-h-screen bg-teal-50 flex items-center justify-center">
       <div className="bg-white rounded-2xl p-8 text-center shadow-lg max-w-xs w-full mx-4">
@@ -317,8 +333,20 @@ Return ONLY a JSON array: [{"sentence":"I wake up at seven every morning.","hint
     </div>
   );
 
+  if (genError) return (
+    <div className="min-h-screen bg-teal-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl p-8 text-center shadow-lg max-w-xs w-full mx-4">
+        <p className="text-gray-700 font-semibold mb-2">Could not generate sentences</p>
+        <p className="text-gray-400 text-sm mb-5">Please make sure an AI provider is connected in settings.</p>
+        <div className="flex gap-3">
+          <button onClick={onBack} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Back</button>
+          <button onClick={loadPuzzles} className="flex-1 py-2.5 rounded-xl bg-teal-600 text-white font-semibold text-sm flex items-center justify-center gap-1"><RefreshCw className="w-4 h-4"/>Retry</button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (gameOver) {
-    stopAudio();
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-teal-50">
         <div className="bg-white rounded-3xl shadow-lg p-8 max-w-sm w-full text-center">

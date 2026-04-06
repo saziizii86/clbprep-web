@@ -16,49 +16,10 @@ const GRAMMAR_FOCUS: Record<string,string> = {
 
 function shuffle<T>(a: T[]): T[] { return [...a].sort(() => Math.random() - 0.5); }
 
-const STATIC_QUESTIONS: Record<string,Record<string,Question[]>> = {
-  "Daily Life": {
-    beginner:[
-      {sentence:"I ___ coffee every morning.",options:["drink","drinks","drank","drinking"],correct:"drink",explanation:"Use 'drink' with 'I' in simple present."},
-      {sentence:"She ___ to the store yesterday.",options:["go","goes","went","going"],correct:"went",explanation:"'Went' is the past tense of 'go'."},
-      {sentence:"He ___ his keys on the table.",options:["leave","left","leaving","leaves"],correct:"left",explanation:"'Left' is past tense of 'leave'."},
-      {sentence:"We usually ___ dinner at seven.",options:["having","had","have","has"],correct:"have",explanation:"Use 'have' with 'we'."},
-      {sentence:"She ___ the dishes every night.",options:["wash","washes","washed","washing"],correct:"washes",explanation:"Third person singular needs -s."},
-    ],
-    intermediate:[
-      {sentence:"She ___ the report by the time I arrived.",options:["finished","has finished","had finished","was finishing"],correct:"had finished",explanation:"Past perfect for action completed before another past action."},
-      {sentence:"I am looking ___ to the weekend.",options:["up","forward","ahead","after"],correct:"forward",explanation:"'Look forward to' is the correct phrase."},
-      {sentence:"He ___ to take the bus when it rains.",options:["tends","tend","tended","tending"],correct:"tends",explanation:"Third person singular: tends."},
-      {sentence:"Could you turn ___ the music?",options:["off","down","up","in"],correct:"down",explanation:"'Turn down' means reduce volume."},
-      {sentence:"She ___ cooking every Sunday.",options:["enjoys","enjoy","enjoyed","is enjoying"],correct:"enjoys",explanation:"Third person singular + gerund after 'enjoy'."},
-    ],
-    advanced:[
-      {sentence:"Despite ___ hard, he failed the exam.",options:["study","studied","studying","to study"],correct:"studying",explanation:"After 'despite', use the gerund (-ing form)."},
-      {sentence:"He is ___ to finishing the project on time.",options:["committed","committing","commit","commits"],correct:"committed",explanation:"'Committed to' is followed by a gerund."},
-      {sentence:"The apartment ___ renovated before the tenants moved in.",options:["had been","was being","has been","would be"],correct:"had been",explanation:"Past perfect passive for action completed before a past moment."},
-    ],
-  },
-  "Work": {
-    beginner:[{sentence:"The meeting ___ at 9 AM tomorrow.",options:["start","starts","started","starting"],correct:"starts",explanation:"Present simple for scheduled events."},{sentence:"She is ___ on the new project.",options:["work","works","worked","working"],correct:"working",explanation:"Present continuous: is + -ing."},{sentence:"He is responsible ___ managing the budget.",options:["for","to","of","in"],correct:"for",explanation:"'Responsible for' is the correct preposition."}],
-    intermediate:[{sentence:"I will ___ the proposal to the client tomorrow.",options:["sending","sent","send","sends"],correct:"send",explanation:"'Will' is followed by the base form."},{sentence:"She is interested ___ the marketing position.",options:["at","on","in","for"],correct:"in",explanation:"'Interested in' uses the preposition 'in'."},{sentence:"He ___ the presentation when the power went out.",options:["was giving","gave","gives","had given"],correct:"was giving",explanation:"Past continuous for interrupted action."}],
-    advanced:[{sentence:"Having ___ the data, we are confident in our findings.",options:["analyze","analyzed","analyzing","analyzes"],correct:"analyzed",explanation:"Perfect participle clause uses the past participle."},{sentence:"She would have applied ___ she known about it sooner.",options:["had","if","when","unless"],correct:"had",explanation:"Third conditional inversion: 'Had she known...'"}],
-  },
-  "Travel":    {beginner:[{sentence:"My passport ___ last month.",options:["expire","expires","expired","expiring"],correct:"expired",explanation:"Simple past for completed event."},{sentence:"We are flying ___ Toronto.",options:["at","in","to","from"],correct:"to",explanation:"'Flying to' shows direction."}],intermediate:[{sentence:"I ___ a window seat when I fly.",options:["prefer","preferred","preferring","prefers"],correct:"prefer",explanation:"Stative verbs use simple present."},{sentence:"The flight was delayed ___ two hours.",options:["for","by","with","at"],correct:"by",explanation:"'Delayed by' shows the amount of delay."}],advanced:[{sentence:"Travellers are advised ___ their belongings unattended.",options:["not leaving","not to leave","to not leave","not leave"],correct:"not to leave",explanation:"Passive advisory: 'advised + not to + infinitive'."}]},
-  "Education": {beginner:[{sentence:"Students ___ study for the exam.",options:["can","should","must","would"],correct:"should",explanation:"'Should' gives advice."},{sentence:"She ___ her assignment yesterday.",options:["submit","submits","submitted","submitting"],correct:"submitted",explanation:"Simple past for completed action."}],intermediate:[{sentence:"He finds grammar ___ to understand.",options:["difficulty","difficult","difficultly","difficulties"],correct:"difficult",explanation:"After 'find + object', use an adjective."},{sentence:"The professor asked us ___ our essays by Thursday.",options:["submit","submitting","to submit","submitted"],correct:"to submit",explanation:"After 'asked us', use the full infinitive."}],advanced:[{sentence:"The research ___ that students learn better through practice.",options:["suggest","suggested","suggests","suggesting"],correct:"suggests",explanation:"Academic writing uses simple present for findings."}]},
-  "Health":    {beginner:[{sentence:"You ___ see a doctor if you feel worse.",options:["will","should","can","must"],correct:"should",explanation:"'Should' gives health advice."},{sentence:"She ___ medication twice a day.",options:["take","takes","took","taking"],correct:"takes",explanation:"Third person singular."}],intermediate:[{sentence:"He has been ___ from a cold all week.",options:["suffer","suffered","suffers","suffering"],correct:"suffering",explanation:"Present perfect continuous: has been + -ing."},{sentence:"Regular exercise is beneficial ___ your health.",options:["to","for","with","in"],correct:"for",explanation:"'Beneficial for' is the correct collocation."}],advanced:[{sentence:"The doctor recommended ___ red meat to improve cholesterol.",options:["reduce","reduced","to reduce","reducing"],correct:"reducing",explanation:"'Recommend' is followed by a gerund."}]},
-  "Food & Cooking":{beginner:[{sentence:"Add a ___ of salt to the pasta.",options:["piece","pinch","cup","slice"],correct:"pinch",explanation:"'A pinch of salt' is the correct collocation."},{sentence:"The recipe ___ two cups of flour.",options:["asks","calls for","needs from","requires for"],correct:"calls for",explanation:"'Calls for' means requires in cooking."}],intermediate:[{sentence:"Let the dough ___ for one hour before baking.",options:["resting","rests","rest","rested"],correct:"rest",explanation:"After 'let', use the base form."},{sentence:"The dish ___ better if you use fresh herbs.",options:["taste","tastes","will taste","tasted"],correct:"will taste",explanation:"First conditional for future result."}],advanced:[{sentence:"The sauce should be reduced ___ it coats the back of a spoon.",options:["while","until","when","once"],correct:"until",explanation:"'Until' shows the endpoint of an ongoing action."}]},
-  "Shopping":  {beginner:[{sentence:"Can I ___ a refund?",options:["gets","got","get","getting"],correct:"get",explanation:"Modal 'can' + base verb."},{sentence:"This shirt is ___ sale.",options:["at","for","on","in"],correct:"on",explanation:"'On sale' is the fixed expression."}],intermediate:[{sentence:"I am looking ___ a gift.",options:["at","to","after","for"],correct:"for",explanation:"'Looking for' means searching."},{sentence:"She ___ the item back the next day.",options:["return","returned","returns","returning"],correct:"returned",explanation:"Simple past for completed action."}],advanced:[{sentence:"Consumers are increasingly ___ toward sustainable brands.",options:["gravitate","gravitated","gravitates","gravitating"],correct:"gravitating",explanation:"Present continuous for ongoing trends."}]},
-  "Technology":{beginner:[{sentence:"Please ___ your phone before the class.",options:["turn on","turn off","turn down","turn up"],correct:"turn off",explanation:"'Turn off' means switch off a device."},{sentence:"He ___ a new app on his phone.",options:["downloads","downloaded","download","downloading"],correct:"downloaded",explanation:"Simple past for completed action."}],intermediate:[{sentence:"You need to ___ your software to fix the bug.",options:["updating","updated","update","updates"],correct:"update",explanation:"'Need to' + base infinitive."},{sentence:"Your data is stored ___ the cloud.",options:["on","in","at","by"],correct:"in",explanation:"'In the cloud' is the standard expression."}],advanced:[{sentence:"The algorithm ___ machine learning to improve recommendations.",options:["leverage","leverages","leveraged","leveraging"],correct:"leverages",explanation:"Singular subject takes -s."},{sentence:"End-to-end encryption ensures that data ___ intercepted during transmission.",options:["cannot be","can not","is not","will not"],correct:"cannot be",explanation:"Passive modal: cannot + be + past participle."}]},
-  "Environment":{beginner:[{sentence:"We should ___ water.",options:["conserve","conserves","conserving","conserved"],correct:"conserve",explanation:"'Should' + base verb form."},{sentence:"Plastic takes hundreds of years to ___.",options:["decompose","decomposes","decomposing","decomposed"],correct:"decompose",explanation:"Infinitive 'to' + base form."}],intermediate:[{sentence:"If we don't act now, the damage ___ irreversible.",options:["becomes","become","will become","becoming"],correct:"will become",explanation:"First conditional: if + present, will + base."},{sentence:"Solar panels ___ energy directly from sunlight.",options:["generate","generates","generated","generating"],correct:"generate",explanation:"Plural subject takes base form."}],advanced:[{sentence:"The policy aims ___ emissions by 40% by 2030.",options:["reducing","to reduce","reduced","reduce"],correct:"to reduce",explanation:"'Aim to' is followed by the full infinitive."}]},
-  "Immigration":{beginner:[{sentence:"I need to ___ for a work permit.",options:["apply to","apply at","apply for","apply on"],correct:"apply for",explanation:"'Apply for' is used with permits."},{sentence:"He ___ permanent residency last year.",options:["receive","receives","received","receiving"],correct:"received",explanation:"Simple past for completed event."}],intermediate:[{sentence:"Applicants must provide proof ___ financial support.",options:["for","of","to","in"],correct:"of",explanation:"'Proof of' is the correct preposition."},{sentence:"You ___ submit all documents before the deadline.",options:["must","should","might","can"],correct:"must",explanation:"'Must' expresses mandatory obligation."}],advanced:[{sentence:"The application was ___ due to missing documentation.",options:["rejecting","reject","rejected","to reject"],correct:"rejected",explanation:"Passive voice: was + past participle."},{sentence:"___ the applicant meet all criteria, the visa would be approved.",options:["Should","If","When","Were"],correct:"Should",explanation:"Formal conditional inversion: 'Should + subject + verb'."}]},
-};
 
 function FillInBlankInner({ config, onBack, onReset }: { config: GameConfig; onBack:()=>void; onReset:()=>void }) {
-  const topicStatic = STATIC_QUESTIONS[config.topic] || STATIC_QUESTIONS["Daily Life"];
-  const diffStatic = topicStatic[config.difficulty] || topicStatic["beginner"];
-  const staticFallback = shuffle(diffStatic).slice(0, 5);
-
   const [isGenerating, setIsGenerating] = useState(true);
+  const [genError, setGenError] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
   const [selected, setSelected] = useState<string|null>(null);
@@ -69,18 +30,24 @@ function FillInBlankInner({ config, onBack, onReset }: { config: GameConfig; onB
 
   useEffect(() => {
     async function load() {
-      const prompt = `Generate exactly 7 fill-in-the-blank English grammar questions related to "${config.topic}" at ${config.difficulty} level (${CLB[config.difficulty]}).
+      try {
+        const seed = Math.floor(Math.random() * 100000);
+        const prompt = `Generate exactly 7 fill-in-the-blank English grammar questions related to "${config.topic}" at ${config.difficulty} level (${CLB[config.difficulty]}). Session seed: ${seed}.
 Grammar focus: ${GRAMMAR_FOCUS[config.difficulty]}.
 Each question must have exactly 4 options (only ONE is correct), and a brief explanation.
 Make the distractors plausible (not obviously wrong).
 Return ONLY a JSON array:
 [{"sentence":"She ___ to work every day.","options":["go","goes","went","going"],"correct":"goes","explanation":"Third person singular uses -s in simple present"}]`;
-      const generated = await generateGameContent<Question[]>(prompt, staticFallback);
-      const valid = generated.filter(q => q?.sentence && q?.options?.length === 4 && q?.correct && q?.explanation
-        && q.options.includes(q.correct) && q.sentence.includes("___"));
-      const final = valid.length >= 3 ? shuffle(valid).slice(0, 5) : staticFallback;
-      setQuestions(final);
-      setIsGenerating(false);
+        const generated = await generateGameContent<Question[]>(prompt, []);
+        const valid = generated.filter(q => q?.sentence && q?.options?.length === 4 && q?.correct && q?.explanation
+          && q.options.includes(q.correct) && q.sentence.includes("___"));
+        if (valid.length < 3) { setGenError(true); return; }
+        setQuestions(shuffle(valid).slice(0, 5));
+      } catch {
+        setGenError(true);
+      } finally {
+        setIsGenerating(false);
+      }
     }
     load();
   }, []);
@@ -129,6 +96,19 @@ Return ONLY a JSON array:
         <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-4"/>
         <p className="text-gray-700 font-semibold">Generating AI grammar questions…</p>
         <p className="text-gray-400 text-sm mt-1">Every session is unique!</p>
+      </div>
+    </div>
+  );
+
+  if (genError) return (
+    <div className="min-h-screen bg-orange-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl p-8 text-center shadow-lg max-w-xs w-full mx-4">
+        <p className="text-gray-700 font-semibold mb-2">Could not generate questions</p>
+        <p className="text-gray-400 text-sm mb-5">Please make sure an AI provider is connected in settings.</p>
+        <div className="flex gap-3">
+          <button onClick={onBack} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Back</button>
+          <button onClick={onReset} className="flex-1 py-2.5 rounded-xl bg-orange-500 text-white font-semibold text-sm flex items-center justify-center gap-1"><RefreshCw className="w-4 h-4"/>Retry</button>
+        </div>
       </div>
     </div>
   );

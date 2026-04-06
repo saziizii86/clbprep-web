@@ -1725,12 +1725,14 @@ const handleTaskClick = (task) => {
 		setCurrentQuestion(0);
 } else if (currentView === 'scenarios') {
   setCurrentView('dashboard');
+  setActiveTab('dashboard');
   setSelectedTask(null);
   setSelectedSkill(null);
 } else if (currentView === 'skill-tasks') {
-		setCurrentView('dashboard');
-		setSelectedSkill(null);
-	  }
+  setCurrentView('dashboard');
+  setActiveTab('dashboard');
+  setSelectedSkill(null);
+}
 	};
   //const handleBack = () => {
    // if (currentView === 'question-active' || currentView === 'question-intro') {
@@ -3574,7 +3576,7 @@ const taskMaterials = materials.filter(
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium"
           >
             <ArrowLeft className="w-5 h-5" />
-            Back to {skill.name} Parts
+            Back to Dashboard
           </button>
 
           <div className={`bg-gradient-to-r ${skill.gradient} rounded-2xl p-6 text-white shadow-lg`}>
@@ -4057,11 +4059,6 @@ const handleDeleteAccount = async () => {
 
   try {
     const me = await account.get();
-	
-	 // ✅ ADD THIS: delete the Users collection document first
-    if (userRowId) {
-      await databases.deleteDocument(DATABASE_ID, USERS_COLLECTION_ID, userRowId);
-    }
 
     const execution = await functions.createExecution(
       DELETE_ACCOUNT_FUNCTION_ID,

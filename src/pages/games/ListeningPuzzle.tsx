@@ -225,65 +225,40 @@ Return ONLY a JSON array: [{"sentence":"She forgot to pay the electricity bill l
     setIsLoading(false);
   };
 
+  const playWithOpenAI = async (key: string, sentence: string) => {
+    if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+    const res = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({ model: "tts-1", input: sentence, voice, speed: 1.0 }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any)?.error?.message ?? "OpenAI TTS failed"); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    blobUrlRef.current = url;
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    setIsLoading(false);
+    setIsSpeaking(true);
+    audio.onended = () => { setIsSpeaking(false); };
+    audio.onerror  = () => { setIsSpeaking(false); setIsLoading(false); };
+    audio.play().catch(() => setIsSpeaking(false));
+  };
+
   const speak = useCallback(async () => {
     if (isSpeaking || isLoading || !current) return;
     stopAudio();
     setIsLoading(true);
-
     try {
       const settings = await getAPISettings();
-      const provider: string = settings?.provider || "openai";
-      // Only use OpenAI TTS if the connected provider is OpenAI, or a dedicated openAIKey exists
-      const apiKey: string = settings?.openAIKey || (provider === "openai" ? (settings?.key || "") : "");
-
-      if (apiKey) {
-        if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
-
-        const speed = config.difficulty === "beginner" ? 0.85 : config.difficulty === "intermediate" ? 0.95 : 1.0;
-
-        const res = await fetch("https://api.openai.com/v1/audio/speech", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: "tts-1-hd", input: current.sentence, voice, speed }),
-        });
-
-        if (!res.ok) throw new Error("OpenAI TTS failed");
-
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        blobUrlRef.current = url;
-
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        setIsLoading(false);
-        setIsSpeaking(true);
-        audio.onended = () => { setIsSpeaking(false); };
-        audio.onerror = () => { setIsSpeaking(false); setIsLoading(false); };
-        audio.play();
-        return;
-      }
+      const key: string = settings?.openAIKey ?? "";
+      if (!key) throw new Error("No OpenAI key configured.");
+      await playWithOpenAI(key, current.sentence);
     } catch (err) {
       console.warn("OpenAI TTS failed:", err);
+      setIsLoading(false);
+      setIsSpeaking(false);
     }
-
-    // Fallback: browser TTS — pick the best available English voice
-    setIsLoading(false);
-    if (!window.speechSynthesis) { return; }
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.lang.startsWith("en") && v.localService && v.name.toLowerCase().includes("natural"))
-      || voices.find(v => v.lang.startsWith("en-CA"))
-      || voices.find(v => v.lang.startsWith("en-US") && v.localService)
-      || voices.find(v => v.lang.startsWith("en"));
-    const utter = new SpeechSynthesisUtterance(current.sentence);
-    utter.lang = "en-CA";
-    if (preferred) utter.voice = preferred;
-    utter.rate = config.difficulty === "beginner" ? 0.85 : config.difficulty === "intermediate" ? 0.9 : 1.0;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
-    utter.onstart = () => setIsSpeaking(true);
-    utter.onend = () => { setIsSpeaking(false); };
-    utter.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utter);
   }, [current?.sentence, isSpeaking, isLoading, voice, config.difficulty]);
 
   const addWord = (w: string, i: number) => {

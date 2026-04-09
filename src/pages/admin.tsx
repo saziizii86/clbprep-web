@@ -165,6 +165,7 @@ const getInitialMaterials = () => getDefaultMaterials();
 
 export default function CelpipAdminDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showPreviewPage, setShowPreviewPage] = useState(false);
@@ -5146,7 +5147,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
     const files = material.uploadedFiles || {};
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-8">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-2 md:py-8">
         <div className="bg-white rounded-xl max-w-4xl w-full mx-4 shadow-2xl">
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b bg-gradient-to-r from-blue-600 to-blue-700 rounded-t-xl">
@@ -5603,12 +5604,12 @@ Please evaluate the student's spoken response and provide scores and feedback in
     };
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-8">
-        <div className="bg-white rounded-xl p-6 max-w-3xl w-full mx-4" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-2 md:py-8">
+        <div className="bg-white rounded-xl p-3 md:p-6 max-w-3xl w-full mx-2 md:mx-4" onClick={(e) => e.stopPropagation()}>
           <form onSubmit={(e) => e.preventDefault()}>
-          <div className="flex justify-between items-center mb-6 sticky top-0 bg-white z-10 pb-4 border-b -mx-6 px-6">
+          <div className="flex justify-between items-center mb-4 md:mb-6 sticky top-0 bg-white z-10 pb-3 md:pb-4 border-b -mx-3 px-3 md:-mx-6 md:px-6">
             <div>
-              <h2 className="text-2xl font-bold">
+              <h2 className="text-lg md:text-2xl font-bold">
                 {editingMaterial ? 'Edit' : 'Upload New'} {isListening ? 'Listening' : isReading ? 'Reading' : isSpeaking ? 'Speaking' : isWriting ? 'Writing' : ''} Material
               </h2>
               {!editingMaterial && (
@@ -5761,7 +5762,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                       Context Image (Optional)
                     </h3>
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-purple-500 transition">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <svg className="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
@@ -5769,7 +5770,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                           <p className="text-sm font-medium">Upload scenario image</p>
                           <p className="text-xs text-gray-500">JPG, PNG (Max 10MB) - Shows context for the conversation</p>
                         </div>
-                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                           Choose File
                           <input 
                             type="file" 
@@ -5807,7 +5808,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     
                     {/* Video Upload */}
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-red-500 transition bg-red-50 mb-3">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -5836,13 +5837,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     
                     {/* Audio Upload (Alternative) */}
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-blue-500 transition bg-blue-50">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <Headphones className="w-8 h-8 text-blue-500" />
                         <div className="flex-1">
                           <p className="text-sm font-medium">Or upload discussion audio</p>
                           <p className="text-xs text-gray-500">MP3, WAV (Max 100MB) - Use this if video is not available</p>
                         </div>
-                        <label className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700">
+                        <label className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700 shrink-0 w-full sm:w-auto text-center">
                           Choose Audio
                           <input 
                             type="file" 
@@ -5888,13 +5889,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                         <div className="mb-3">
                           <label className="block text-xs font-medium mb-2">Audio File *</label>
                           <div className="border-2 border-dashed rounded-lg p-3 hover:border-blue-500 transition bg-white">
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                               <Mic className="w-6 h-6 text-blue-500" />
                               <div className="flex-1">
                                 <p className="text-sm font-medium">Upload audio for section {idx + 1}</p>
                                 <p className="text-xs text-gray-500">MP3, WAV (Max 100MB)</p>
                               </div>
-                              <label className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs cursor-pointer hover:bg-blue-700">
+                              <label className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs cursor-pointer hover:bg-blue-700 shrink-0 w-full sm:w-auto text-center">
                                 Choose File
                                 <input 
                                   type="file" 
@@ -5921,13 +5922,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                         <div>
                           <label className="block text-xs font-medium mb-2">Transcript (Optional)</label>
                           <div className="border-2 border-dashed rounded-lg p-3 hover:border-green-500 transition bg-white">
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                               <FileText className="w-6 h-6 text-green-500" />
                               <div className="flex-1">
                                 <p className="text-sm font-medium">Upload transcript for section {idx + 1}</p>
                                 <p className="text-xs text-gray-500">TXT, PDF, DOCX (Optional for practice)</p>
                               </div>
-                              <label className="px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-gray-50">
+                              <label className="px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                                 Choose File
                                 <input 
                                   type="file" 
@@ -5961,13 +5962,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                       Discussion Transcript (Optional)
                     </label>
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-green-500 transition">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <FileText className="w-8 h-8 text-green-500" />
                         <div className="flex-1">
                           <p className="text-sm font-medium">Upload discussion transcript</p>
                           <p className="text-xs text-gray-500">TXT, PDF, DOCX (Optional for practice)</p>
                         </div>
-                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                           Choose File
                           <input 
                             type="file" 
@@ -6013,7 +6014,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                           <div className="mb-3">
                             <label className="block text-xs font-medium mb-2">Question Audio *</label>
                             <div className="border-2 border-dashed rounded-lg p-3 hover:border-purple-500 transition bg-white">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                 <svg className="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                                 </svg>
@@ -6133,13 +6134,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                           <div>
                             <label className="block text-xs font-medium mb-2">Question Transcript (Optional)</label>
                             <div className="border-2 border-dashed rounded-lg p-3 hover:border-green-500 transition bg-white">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                 <FileText className="w-6 h-6 text-green-500" />
                                 <div className="flex-1">
                                   <p className="text-sm font-medium">Upload transcript for question {idx + 1}</p>
                                   <p className="text-xs text-gray-500">TXT, PDF, DOCX</p>
                                 </div>
-                                <label className="px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-gray-50">
+                                <label className="px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                                   Choose File
                                   <input 
                                     type="file" 
@@ -6178,7 +6179,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                               Upload Question TXT File (Question + 4 Options)
                             </label>
                             <div className="border-2 border-dashed rounded-lg p-3 hover:border-purple-500 transition bg-white">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                 <FileText className="w-6 h-6 text-purple-500" />
                                 <div className="flex-1">
                                   <p className="text-sm">Upload TXT for Question {idx + 1}</p>
@@ -6366,13 +6367,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     </div>
                   ) : (
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-purple-500 transition">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <FileText className="w-8 h-8 text-purple-500" />
                         <div className="flex-1">
                           <p className="text-sm font-medium">Questions Document *</p>
                           <p className="text-xs text-gray-500">PDF, DOCX - Include all {selectedTask.questions} questions</p>
                         </div>
-                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                        <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                           Choose File
                           <input 
                             type="file" 
@@ -6398,13 +6399,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     Answer Key Document *
                   </label>
                   <div className="border-2 border-dashed rounded-lg p-4 hover:border-green-500 transition bg-green-50">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                       <CheckCircle className="w-8 h-8 text-green-500" />
                       <div className="flex-1">
                         <p className="text-sm font-medium">Upload answer key with correct answers</p>
                         <p className="text-xs text-gray-500">PDF, DOCX - Include correct answer for each question</p>
                       </div>
-                      <label className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm cursor-pointer hover:bg-green-700">
+                      <label className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm cursor-pointer hover:bg-green-700 shrink-0 w-full sm:w-auto text-center">
                         Choose File
                         <input 
                           type="file" 
@@ -6435,13 +6436,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     Reading Passage *
                   </h3>
                   <div className="border-2 border-dashed rounded-lg p-4 hover:border-blue-500 transition bg-blue-50">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                       <FileText className="w-8 h-8 text-blue-500" />
                       <div className="flex-1">
                         <p className="text-sm font-medium">Upload reading passage</p>
                         <p className="text-xs text-gray-500">TXT, PDF, DOCX - The text students will read</p>
                       </div>
-                      <label className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700">
+                      <label className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700 shrink-0 w-full sm:w-auto text-center">
                         Choose File
                         <input 
                           type="file" 
@@ -6474,7 +6475,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                       Diagram Image *
                     </h3>
                     <div className="border-2 border-dashed rounded-lg p-4 hover:border-orange-500 transition bg-orange-50">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <svg className="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
@@ -6482,7 +6483,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                           <p className="text-sm font-medium">Upload diagram/image</p>
                           <p className="text-xs text-gray-500">PNG, JPG - The diagram students reference</p>
                         </div>
-                        <label className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm cursor-pointer hover:bg-orange-700">
+                        <label className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm cursor-pointer hover:bg-orange-700 shrink-0 w-full sm:w-auto text-center">
                           Choose Image
                           <input 
                             type="file" 
@@ -6647,7 +6648,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                                   Upload Question TXT File (Question + Options)
                                 </span>
                                 <div className="border-2 border-dashed rounded-lg p-3 hover:border-purple-500 transition bg-white">
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                     <FileText className="w-6 h-6 text-purple-500" />
                                     <div className="flex-1">
                                       <p className="text-sm">Upload TXT for Question {idx + 1}</p>
@@ -6860,7 +6861,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                               {/* Upload TXT for this blank's options */}
                               <div className="mb-3">
                                 <div className="border-2 border-dashed rounded-lg p-3 hover:border-yellow-500 transition bg-white">
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                     <FileText className="w-6 h-6 text-yellow-600" />
                                     <div className="flex-1">
                                       <p className="text-sm">Upload TXT for Blank {blankNum}</p>
@@ -7002,13 +7003,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     Answer Key Document *
                   </label>
                   <div className="border-2 border-dashed rounded-lg p-4 hover:border-green-500 transition bg-green-50">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                       <CheckCircle className="w-8 h-8 text-green-500" />
                       <div className="flex-1">
                         <p className="text-sm font-medium">Upload answer key with correct answers</p>
                         <p className="text-xs text-gray-500">TXT, PDF, DOCX - Include correct answer for each question</p>
                       </div>
-                      <label className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm cursor-pointer hover:bg-green-700">
+                      <label className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm cursor-pointer hover:bg-green-700 shrink-0 w-full sm:w-auto text-center">
                         Choose File
                         <input 
                           type="file" 
@@ -7240,7 +7241,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                     <div key={idx} className="mb-3">
                       <label className="block text-sm font-medium mb-2">Scene Image *</label>
                       <div className="border-2 border-dashed rounded-lg p-4 hover:border-orange-500 transition bg-orange-50">
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                           <svg className="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
@@ -7252,7 +7253,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
                             </p>
                             <p className="text-xs text-gray-500">JPG, PNG (Max 5MB)</p>
                           </div>
-                          <label className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm cursor-pointer hover:bg-orange-700">
+                          <label className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm cursor-pointer hover:bg-orange-700 shrink-0 w-full sm:w-auto text-center">
                             Choose File
                             <input 
                               type="file" 
@@ -7480,13 +7481,13 @@ Please evaluate the student's spoken response and provide scores and feedback in
               <div>
                 <label className="block text-sm font-medium mb-2">Material File *</label>
                 <div className="border-2 border-dashed rounded-lg p-4 hover:border-purple-500 transition">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                     <Upload className="w-8 h-8 text-purple-500" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">Upload material file</p>
                       <p className="text-xs text-gray-500">PDF, DOCX (Max 50MB)</p>
                     </div>
-                    <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                    <label className="px-4 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50 shrink-0 w-full sm:w-auto text-center">
                       Choose File
                       <input 
                         type="file" 
@@ -7506,10 +7507,10 @@ Please evaluate the student's spoken response and provide scores and feedback in
               </div>
             )}
 
-            <div className="flex gap-4 pt-4 border-t">
+            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
               <button 
                 type="button"
-                className="flex-1 border px-6 py-3 rounded-lg hover:bg-gray-50"
+                className="flex-1 border px-4 py-3 rounded-lg hover:bg-gray-50 text-sm sm:text-base"
                 onClick={() => {
                   setShowUploadModal(false);
                   setEditingMaterial(null);
@@ -7520,7 +7521,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
               </button>
               <button 
                 type="button"
-                className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
+                className="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 text-sm sm:text-base"
                 onClick={handleSubmit}
               >
                 <Save className="w-5 h-5" />
@@ -7535,6 +7536,7 @@ Please evaluate the student's spoken response and provide scores and feedback in
   };
 
   const Sidebar = () => {
+  const closeSidebar = () => setSidebarOpen(false);
   // Count materials for each listening part (practice)
 const getPartCount = (partId, isMock = false, skill = "listening") => {
   return materials.filter((m) =>
@@ -7568,21 +7570,30 @@ const getPartCount = (partId, isMock = false, skill = "listening") => {
   ];
 
   return (
-    <div className="w-64 bg-gray-900 text-white h-screen fixed left-0 top-0 flex flex-col">
+    <div className={`w-64 bg-gray-900 text-white h-screen fixed left-0 top-0 flex flex-col z-50 transform transition-transform duration-200 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
       <div className="p-6 border-b border-gray-800">
-        <div className="flex items-center gap-2">
-          <Award className="w-8 h-8 text-blue-500" />
-          <div>
-            <h1 className="text-xl font-bold">CELPIP</h1>
-            <p className="text-xs text-gray-400">Admin Dashboard</p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Award className="w-8 h-8 text-blue-500" />
+            <div>
+              <h1 className="text-xl font-bold">CELPIP</h1>
+              <p className="text-xs text-gray-400">Admin Dashboard</p>
+            </div>
           </div>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden p-1 text-gray-400 hover:text-white"
+            aria-label="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {/* Dashboard */}
         <button
-          onClick={() => { setActiveTab('dashboard'); setActiveSubTab(null); }}
+          onClick={() => { setActiveTab('dashboard'); setActiveSubTab(null); closeSidebar(); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
             activeTab === 'dashboard' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
           }`}
@@ -7654,7 +7665,7 @@ const getPartCount = (partId, isMock = false, skill = "listening") => {
                       return (
                         <button
                           key={`mock-${part.id}`}
-                          onClick={() => { setActiveTab('mock'); setActiveSubTab(`mock-listening-${part.id}`); }}
+                          onClick={() => { setActiveTab('mock'); setActiveSubTab(`mock-listening-${part.id}`); closeSidebar(); }}
                           className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
                             activeSubTab === `mock-listening-${part.id}` 
                               ? 'bg-purple-400 text-white' 
@@ -7723,6 +7734,7 @@ const getPartCount = (partId, isMock = false, skill = "listening") => {
             onClick={() => {
               setActiveTab("mock");
               setActiveSubTab(`mock-reading-${part.id}`);
+              closeSidebar();
             }}
             className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
               activeSubTab === `mock-reading-${part.id}`
@@ -7792,6 +7804,7 @@ const getPartCount = (partId, isMock = false, skill = "listening") => {
             onClick={() => {
               setActiveTab("mock");
               setActiveSubTab(`mock-writing-${part.id}`);
+              closeSidebar();
             }}
             className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
               activeSubTab === `mock-writing-${part.id}`
@@ -7861,6 +7874,7 @@ const getPartCount = (partId, isMock = false, skill = "listening") => {
             onClick={() => {
               setActiveTab("mock");
               setActiveSubTab(`mock-speaking-${part.id}`);
+              closeSidebar();
             }}
             className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
               activeSubTab === `mock-speaking-${part.id}`
@@ -7946,7 +7960,7 @@ onClick={() => {
                       return (
                         <button
                           key={part.id}
-                          onClick={() => { setActiveTab('listening'); setActiveSubTab(part.id); }}
+                          onClick={() => { setActiveTab('listening'); setActiveSubTab(part.id); closeSidebar(); }}
                           className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
                             (activeTab === 'listening' && activeSubTab === part.id)
                               ? 'bg-blue-400 text-white'
@@ -7997,7 +8011,7 @@ onClick={() => {
                       return (
                         <button
                           key={task.id}
-                          onClick={() => { setActiveTab("reading"); setActiveSubTab(dbTaskId); }}
+                          onClick={() => { setActiveTab("reading"); setActiveSubTab(dbTaskId); closeSidebar(); }}
                           className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
                             activeTab === "reading" && activeSubTab === dbTaskId
                               ? "bg-blue-400 text-white"
@@ -8048,7 +8062,7 @@ onClick={() => {
                       return (
                         <button
                           key={task.id}
-                          onClick={() => { setActiveTab("writing"); setActiveSubTab(dbTaskId); }}
+                          onClick={() => { setActiveTab("writing"); setActiveSubTab(dbTaskId); closeSidebar(); }}
                           className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
                             activeTab === "writing" && activeSubTab === dbTaskId
                               ? "bg-blue-400 text-white"
@@ -8098,7 +8112,7 @@ onClick={() => {
                       return (
                         <button
                           key={part.id}
-                          onClick={() => { setActiveTab('speaking'); setActiveSubTab(part.id); }}
+                          onClick={() => { setActiveTab('speaking'); setActiveSubTab(part.id); closeSidebar(); }}
                           className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition ${
                             (activeTab === 'speaking' && activeSubTab === part.id)
                               ? 'bg-orange-500 text-white'
@@ -8123,7 +8137,7 @@ onClick={() => {
         {/* Students */}
         {/* Students */}
         <button
-          onClick={() => { setActiveTab('students'); setActiveSubTab(null); }}
+          onClick={() => { setActiveTab('students'); setActiveSubTab(null); closeSidebar(); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
             activeTab === 'students' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
           }`}
@@ -8134,7 +8148,7 @@ onClick={() => {
 
         {/* Analytics */}
         <button
-          onClick={() => { setActiveTab('analytics'); setActiveSubTab(null); }}
+          onClick={() => { setActiveTab('analytics'); setActiveSubTab(null); closeSidebar(); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
             activeTab === 'analytics' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
           }`}
@@ -8144,7 +8158,7 @@ onClick={() => {
         </button>
 {		/* API Settings */}
         <button
-          onClick={() => { setActiveTab('api-settings'); setActiveSubTab(null); }}
+          onClick={() => { setActiveTab('api-settings'); setActiveSubTab(null); closeSidebar(); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
             activeTab === 'api-settings' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
           }`}
@@ -8154,7 +8168,7 @@ onClick={() => {
         </button>
         {/* Settings */}
         <button
-          onClick={() => { setActiveTab('settings'); setActiveSubTab(null); }}
+          onClick={() => { setActiveTab('settings'); setActiveSubTab(null); closeSidebar(); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
             activeTab === 'settings' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
           }`}
@@ -8263,9 +8277,9 @@ onClick={() => {
     };
 
     return (
-      <div className="space-y-6">
-        <div className="flex gap-4 justify-between">
-          <div className="flex-1 max-w-md">
+      <div className="space-y-4 md:space-y-6">
+        <div className="flex flex-col sm:flex-row gap-3 justify-between">
+          <div className="flex-1 sm:max-w-md">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
@@ -8277,9 +8291,9 @@ onClick={() => {
               />
             </div>
           </div>
-          <div className="flex gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
-              <Filter className="w-5 h-5" />
+          <div className="flex gap-2">
+            <button className="flex items-center gap-2 px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <Filter className="w-4 h-4" />
               Filter
             </button>
 <button
@@ -8315,57 +8329,57 @@ onClick={() => {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <table className="w-full table-auto">
+        <div className="bg-white rounded-xl border shadow-sm overflow-x-auto">
+          <table className="w-full table-auto min-w-[600px]">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
                 {activeTab === 'materials' && (
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                  <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Type</th>
                 )}
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
 				{activeTab === "mock" && (
-  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+  <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
     Mock
   </th>
 )}
 
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Downloads</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Date</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Downloads</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {filteredMaterials.map((material, index) => (
 				  <tr key={material.id} className="hover:bg-gray-50">
-					<td className="px-6 py-4">
-					  <div className="flex items-center gap-3">
-						<span className="text-gray-400 font-medium w-6 text-center">{index + 1}.</span>
-						<div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+					<td className="px-4 md:px-6 py-3 md:py-4">
+					  <div className="flex items-center gap-2 md:gap-3">
+						<span className="text-gray-400 font-medium w-5 text-center text-sm">{index + 1}.</span>
+						<div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
 						  {getSkillIcon(material.skill)}
 						</div>
-						<p className="font-medium">{material.title}</p>
+						<p className="font-medium text-sm md:text-base truncate max-w-[120px] md:max-w-none">{material.title}</p>
 					  </div>
 					</td>
                   {activeTab === 'materials' && (
-                    <td className="px-6 py-4">
-                      <span className="px-3 py-1 bg-gray-100 rounded-full text-sm capitalize">
+                    <td className="px-4 md:px-6 py-3 md:py-4 hidden sm:table-cell">
+                      <span className="px-2 py-1 bg-gray-100 rounded-full text-xs md:text-sm capitalize">
                         {material.skill}
                       </span>
                     </td>
                   )}
-                  <td className="px-6 py-4 text-sm text-gray-600">{material.task}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-xs md:text-sm text-gray-600 max-w-[100px] truncate">{material.task}</td>
 				  {activeTab === "mock" && (
-  <td className="px-6 py-4 text-sm text-gray-600">
+  <td className="px-4 md:px-6 py-3 md:py-4 text-xs md:text-sm text-gray-600">
     {material.isMock ? `Mock ${material.mockSet ?? "-"}` : "-"}
   </td>
 )}
 
-                  <td className="px-6 py-4">
+                  <td className="px-4 md:px-6 py-3 md:py-4">
                     <button
                       onClick={() => togglePublishStatus(material.id)}
-                      className={`px-3 py-1 rounded-full text-sm flex items-center gap-1 transition hover:opacity-80 ${
+                      className={`px-2 py-1 rounded-full text-xs flex items-center gap-1 transition hover:opacity-80 ${
                         material.status === 'Published' 
                           ? 'bg-green-100 text-green-700' 
                           : 'bg-yellow-100 text-yellow-700'
@@ -8379,33 +8393,33 @@ onClick={() => {
                       {material.status}
                     </button>
                   </td>
-                  <td className="px-6 py-4 text-gray-600">{material.date}</td>
-                  <td className="px-6 py-4 text-gray-600">{material.downloads}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex gap-2">
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-gray-600 text-sm hidden md:table-cell">{material.date}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-gray-600 text-sm hidden lg:table-cell">{material.downloads}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4">
+                    <div className="flex gap-1 md:gap-2">
                       <button 
-                        className="p-2 hover:bg-blue-50 rounded-lg"
+                        className="p-1.5 md:p-2 hover:bg-blue-50 rounded-lg"
                         onClick={() => openPreviewPage(material)}
                         title="Preview Content"
                       >
                         <Play className="w-4 h-4 text-blue-600" />
                       </button>
                       <button 
-                        className="p-2 hover:bg-gray-100 rounded-lg"
+                        className="p-1.5 md:p-2 hover:bg-gray-100 rounded-lg"
                         onClick={() => openViewModal(material)}
                         title="View Details"
                       >
                         <Eye className="w-4 h-4 text-gray-600" />
                       </button>
                       <button 
-                        className="p-2 hover:bg-blue-50 rounded-lg"
+                        className="p-1.5 md:p-2 hover:bg-blue-50 rounded-lg"
                         onClick={() => openEditModal(material)}
                         title="Edit Material"
                       >
                         <Edit className="w-4 h-4 text-blue-600" />
                       </button>
                       <button 
-                        className="p-2 hover:bg-red-50 rounded-lg"
+                        className="p-1.5 md:p-2 hover:bg-red-50 rounded-lg"
                         onClick={() => handleDelete(material.id)}
                         title="Delete Material"
                       >
@@ -8953,11 +8967,22 @@ const filteredStudents = onlyStudents.filter((student: any) => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
       <Sidebar />
       
-      <div className="ml-64">
-        <header className="bg-white border-b px-8 py-4">
-			  <div className="flex justify-between items-center">
+      <div className="ml-0 md:ml-64">
+        <header className="bg-white border-b px-4 md:px-8 py-4">
+		  <div className="flex justify-between items-center">
+				<div className="flex items-center gap-3">
+				  <button
+				    onClick={() => setSidebarOpen(true)}
+				    className="md:hidden p-2 rounded-lg hover:bg-gray-100"
+				    aria-label="Open menu"
+				  >
+				    <List className="w-5 h-5" />
+				  </button>
 				<div>
 				  <h2 className="text-2xl font-bold capitalize flex items-center gap-3">
 					{activeTab === 'mock' ? 'Mock Exam' : activeTab}
@@ -9023,6 +9048,7 @@ const filteredStudents = onlyStudents.filter((student: any) => {
 					}
 				  </p>
 				</div>
+				</div>
 				<div className="flex items-center gap-4">
 				  <div className="flex items-center gap-3">
 					<div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
@@ -9037,9 +9063,9 @@ const filteredStudents = onlyStudents.filter((student: any) => {
 			  </div>
 			</header>
 
-        <main className="p-8">
+        <main className="p-4 md:p-8">
           {activeTab === 'dashboard' ? (
-            <div className="grid grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
 {dashboardStats.map((stat, i) => (
   <div key={i} className="bg-white rounded-xl p-6 border">
     <stat.icon className="w-6 h-6 text-blue-600 mb-4" />

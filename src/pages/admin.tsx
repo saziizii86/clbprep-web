@@ -8614,15 +8614,19 @@ const filteredStudents = onlyStudents.filter((student: any) => {
     </span>
   </td>
 
-  <td className="px-3 py-3 whitespace-nowrap">
+ <td className="px-3 py-3 whitespace-nowrap">
     <span
       className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        isProActive(student)
+        student.subscriptionSource === "partner"
+          ? "bg-blue-100 text-blue-700"
+          : isProActive(student)
           ? "bg-amber-100 text-amber-700"
           : "bg-gray-100 text-gray-700"
       }`}
     >
-      {prettifyPlan(student.subscriptionPlan)}
+      {student.subscriptionSource === "partner"
+        ? `Partner (${student.partnerName || "?"})`
+        : prettifyPlan(student.subscriptionPlan)}
     </span>
   </td>
 
@@ -8656,8 +8660,10 @@ const filteredStudents = onlyStudents.filter((student: any) => {
     {formatDateTime(student.subscriptionStartAt)}
   </td>
 
-  <td className="px-3 py-3 text-gray-700">
-    {formatDateTime(student.subscriptionEndAt)}
+<td className="px-3 py-3 text-gray-700">
+    {student.subscriptionSource === "partner"
+      ? formatDateTime(student.proUntil)
+      : formatDateTime(student.subscriptionEndAt)}
   </td>
 
 <td className="px-3 py-3 text-gray-700">

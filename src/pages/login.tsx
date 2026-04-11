@@ -336,11 +336,12 @@ const checkAndActivatePartnerAccess = async (email: string) => {
     const userDoc = userRes.documents[0];
 
     // activate Pro on the user
-    await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, userDoc.$id, {
+await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, userDoc.$id, {
       subscriptionStatus: "active",
       subscriptionPlan: "partner",
       subscriptionSource: "partner",
       proUntil: endAtISO,
+      partnerName: eligDoc.partnerName || null,
     });
 
     // mark eligibility as claimed

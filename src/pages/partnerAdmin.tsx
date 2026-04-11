@@ -188,20 +188,85 @@ export default function PartnerAdmin() {
         if (existing) continue;
         // reactivate if previously inactive
         const inactive = eligible.find(e => e.email === email && e.status === "inactive");
-        if (inactive) {
-          await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, inactive.$id, {
-            status: "approved",
-            updatedAt: new Date().toISOString(),
-          });
-        } else {
-          await databases.createDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, ID.unique(), {
-            partnerName,
-            email,
-            status: "approved",
-            durationDays: 90,
-            renewalCount: 0,
-            updatedAt: new Date().toISOString(),
-          });
+if (inactive) {
+          // check if user already registered
+          const userRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+            Query.equal("email", email),
+          ]);
+          const existingUser = userRes.documents[0] as any;
+          const now = new Date();
+          const endAt = new Date(now);
+          endAt.setDate(endAt.getDate() + 90);
+          const endAtISO = endAt.toISOString();
+
+          if (existingUser) {
+            // user exists — reactivate as claimed and restore subscription
+            await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, inactive.$id, {
+              status: "claimed",
+              claimedByUserId: existingUser.$id,
+              claimedAt: now.toISOString(),
+              endAt: endAtISO,
+              updatedAt: now.toISOString(),
+            });
+            await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, existingUser.$id, {
+              subscriptionStatus: "active",
+              subscriptionPlan: "partner",
+              subscriptionSource: "partner",
+              proUntil: endAtISO,
+              partnerName,
+            });
+          } else {
+            // user not registered — just reactivate as approved
+            await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, inactive.$id, {
+              status: "approved",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+} else {
+          // check if user already exists in Users collection
+          const userRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+            Query.equal("email", email),
+          ]);
+          const existingUser = userRes.documents[0] as any;
+
+          const now = new Date();
+          const endAt = new Date(now);
+          endAt.setDate(endAt.getDate() + 90);
+          const endAtISO = endAt.toISOString();
+
+          if (existingUser) {
+            // user already registered — create as claimed and activate immediately
+            const docId = ID.unique();
+            await databases.createDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, docId, {
+              partnerName,
+              email,
+              status: "claimed",
+              durationDays: 90,
+              claimedByUserId: existingUser.$id,
+              claimedAt: now.toISOString(),
+              endAt: endAtISO,
+              renewalCount: 0,
+              updatedAt: now.toISOString(),
+            });
+            // activate their subscription
+await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, existingUser.$id, {
+              subscriptionStatus: "active",
+              subscriptionPlan: "partner",
+              subscriptionSource: "partner",
+              proUntil: endAtISO,
+              partnerName,
+            });
+          } else {
+            // user not registered yet — create as approved
+            await databases.createDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, ID.unique(), {
+              partnerName,
+              email,
+              status: "approved",
+              durationDays: 90,
+              renewalCount: 0,
+              updatedAt: now.toISOString(),
+            });
+          }
         }
         added++;
       }
@@ -216,36 +281,94 @@ export default function PartnerAdmin() {
   };
 
   // ── deactivate ─────────────────────────────────────────────────────────────
-  const handleDeactivate = async (doc: EligibilityDoc) => {
-    if (!confirm(`Deactivate ${doc.email}? Their access will end at expiry.`)) return;
+const handleDeactivate = async (doc: EligibilityDoc) => {
+    if (!confirm(`Deactivate ${doc.email}? Their access will be removed immediately.`)) return;
     await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, doc.$id, {
       status: "inactive",
       updatedAt: new Date().toISOString(),
     });
+    // also revoke the user's Pro access immediately
+    if (doc.claimedByUserId) {
+      try {
+        await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, doc.claimedByUserId, {
+          subscriptionStatus: "inactive",
+          subscriptionPlan: "basic",
+          subscriptionSource: null,
+          proUntil: null,
+        });
+      } catch {}
+    }
     await loadEligible();
-    showToast(`${doc.email} deactivated.`);
+    showToast(`${doc.email} deactivated and access removed.`);
+  };
+  
+  const handleRemove = async (doc: EligibilityDoc) => {
+    if (!confirm(`Permanently remove ${doc.email} from the ${partnerName} list? This cannot be undone.`)) return;
+    await databases.deleteDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, doc.$id);
+    // also revoke access if they were claimed
+    if (doc.claimedByUserId) {
+      try {
+        await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, doc.claimedByUserId, {
+          subscriptionStatus: "inactive",
+          subscriptionPlan: "basic",
+          subscriptionSource: null,
+          proUntil: null,
+        });
+      } catch {}
+    }
+    await loadEligible();
+    showToast(`${doc.email} removed from list.`);
   };
 
   // ── extend directly from eligible list ────────────────────────────────────
-  const handleExtend = async (doc: EligibilityDoc) => {
+const handleExtend = async (doc: EligibilityDoc) => {
     const newEndAt = calcNewEndAt(doc.endAt);
+
+    // if reactivating, check if user exists in db
+    let resolvedStatus = doc.status === "inactive" ? "approved" : doc.status;
+    let resolvedClaimedByUserId = doc.claimedByUserId;
+
+    if (doc.status === "inactive") {
+      const userRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+        Query.equal("email", doc.email),
+      ]);
+      const existingUser = userRes.documents[0] as any;
+      if (existingUser) {
+        resolvedStatus = "claimed";
+        resolvedClaimedByUserId = existingUser.$id;
+        // activate subscription
+        await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, existingUser.$id, {
+          subscriptionStatus: "active",
+          subscriptionPlan: "partner",
+          subscriptionSource: "partner",
+          proUntil: newEndAt,
+          partnerName,
+        });
+      }
+    }
+
     await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, doc.$id, {
       endAt: newEndAt,
       renewalCount: (doc.renewalCount || 0) + 1,
-      status: doc.status === "inactive" ? "approved" : doc.status,
+      status: resolvedStatus,
+      claimedByUserId: resolvedClaimedByUserId || null,
+      claimedAt: resolvedStatus === "claimed" && !doc.claimedByUserId ? new Date().toISOString() : doc.claimedAt,
       updatedAt: new Date().toISOString(),
     });
-    // also update the user's proUntil if claimed
-    if (doc.claimedByUserId) {
+
+    // also update the user's proUntil if already claimed before
+    if (resolvedStatus !== "inactive" && doc.claimedByUserId && doc.status !== "inactive") {
       try {
         await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, doc.claimedByUserId, {
           subscriptionStatus: "active",
           subscriptionPlan: "partner",
           proUntil: newEndAt,
           subscriptionSource: "partner",
+          partnerName,
         });
       } catch {}
     }
+
     await loadEligible();
     showToast(`Extended to ${fmtDate(newEndAt)}`);
   };
@@ -621,7 +744,7 @@ export default function PartnerAdmin() {
                               +90d
                             </button>
                           )}
-                          {doc.status !== "inactive" && (
+{doc.status !== "inactive" && (
                             <button
                               onClick={() => handleDeactivate(doc)}
                               className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100"
@@ -637,6 +760,12 @@ export default function PartnerAdmin() {
                               Reactivate
                             </button>
                           )}
+                          <button
+                            onClick={() => handleRemove(doc)}
+                            className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded hover:bg-gray-200"
+                          >
+                            Remove
+                          </button>
                         </div>
                       </td>
                     </tr>

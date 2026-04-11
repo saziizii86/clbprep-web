@@ -2,7 +2,7 @@
 // ============================================================
 // AI Skill Builders — with LIVE AI-powered practice sessions
 // ============================================================
-
+const FREE_TRIAL_LIMIT = 15;
 import React, { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft,
@@ -1980,27 +1980,30 @@ const PronunciationSession: React.FC<{
   }, [timerStarted]);
 
   // Save history when session ends (phase becomes "done")
-  const savedRef = useRef(false);
-  useEffect(() => {
-    if (phase !== "done" || savedRef.current || !userId) return;
-    savedRef.current = true;
-    const avg = results.length
-      ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length)
-      : 0;
-    const wordList = results.map(r => r.word).join(", ");
-    saveSessionToHistory({
-      userId,
-      builderType: builder.id,
-      mode,
-      topic,
-      level,
-      duration,
-      angle: topicLabel,
-      summary: `Practiced ${results.length} word${results.length !== 1 ? "s" : ""}: ${wordList || "—"}`,
-      score: results.length > 0 ? `${avg}%` : "—",
-      completedAt: new Date().toISOString(),
-    });
-  }, [phase]);
+const savedRef = useRef(false);
+const [savePending, setSavePending] = useState(false);
+
+useEffect(() => {
+  if (phase !== "done" || savedRef.current || !userId) return;
+  savedRef.current = true;
+  setSavePending(true);
+  const avg = results.length
+    ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length)
+    : 0;
+  const wordList = results.map(r => r.word).join(", ");
+  saveSessionToHistory({
+    userId,
+    builderType: builder.id,
+    mode,
+    topic,
+    level,
+    duration,
+    angle: topicLabel,
+    summary: `Practiced ${results.length} word${results.length !== 1 ? "s" : ""}: ${wordList || "—"}`,
+    score: results.length > 0 ? `${avg}%` : "—",
+    completedAt: new Date().toISOString(),
+  }).finally(() => setSavePending(false));
+}, [phase]);
 
   // Load API settings + first batch
   useEffect(() => {
@@ -2955,7 +2958,7 @@ const AISessionChat: React.FC<{
   }, [secondsLeft, timerStarted, timerExpired]);
 
   const saveCurrentHistory = async () => {
-    if (!userId || messages.length < 2) return;
+    if (!userId || messages.length < 1) return;
     const topicLbl = TOPICS.find((t) => t.id === topic)?.label ?? topic;
     // Extract the angle from the first AI message if it mentions one
     const firstAiMsg = messages.find(m => m.role === "ai" && !m.isLoading)?.text ?? "";
@@ -3202,10 +3205,24 @@ const Chip: React.FC<{ selected: boolean; onClick: () => void; children: React.R
 const BuilderDetailPage: React.FC<{
   builder: Builder;
   isProMember: boolean;
+  totalFreeTriesUsed: number;
+  totalFreeTriesRemaining: number;
+  builderSessionCount: number;
   onBack: () => void;
   openUpgradeModal: (msg?: string) => void;
+  onSessionComplete?: () => void;
   userId?: string;
-}> = ({ builder, isProMember, onBack, openUpgradeModal, userId }) => {
+}> = ({
+  builder,
+  isProMember,
+  totalFreeTriesUsed,
+  totalFreeTriesRemaining,
+  builderSessionCount,
+  onSessionComplete,
+  onBack,
+  openUpgradeModal,
+  userId,
+}) => {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -3235,7 +3252,7 @@ const BuilderDetailPage: React.FC<{
           topic={topic}
           duration={duration}
           userId={userId}
-          onBack={() => setSessionStarted(false)}
+          onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
         />
       );
     }
@@ -3248,7 +3265,7 @@ const BuilderDetailPage: React.FC<{
           topic={topic}
           duration={duration}
           userId={userId}
-          onBack={() => setSessionStarted(false)}
+          onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
         />
       );
     }
@@ -3263,7 +3280,7 @@ const BuilderDetailPage: React.FC<{
         userId={userId}
         grammarTopic={grammarTopic ?? undefined}
         grammarSubTopic={grammarSubTopic ?? undefined}
-        onBack={() => setSessionStarted(false)}
+        onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
       />
     );
   }
@@ -3488,18 +3505,34 @@ const BuilderDetailPage: React.FC<{
       )}
 
       {/* Start button — full width at the bottom */}
+	  
+	  {!isProMember && (
+  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+    <p className="text-sm font-bold text-amber-800">
+      Total free sessions remaining: {totalFreeTriesRemaining} / {FREE_TRIAL_LIMIT}
+    </p>
+    <p className="text-xs text-amber-700 mt-1">
+      Sessions completed in this builder: {builderSessionCount}
+    </p>
+  </div>
+)}
+
       <div className="flex flex-col items-center gap-3 pb-2">
-        <button
-          disabled={!canStart}
-          onClick={() => {
-            if (!isProMember) { openUpgradeModal("Upgrade to Pro to unlock unlimited AI Skill Builder sessions."); return; }
-            setSessionStarted(true);
-          }}
-          className={`w-full py-4 rounded-2xl text-base font-bold transition flex items-center justify-center gap-3 shadow-lg ${
-            canStart
-              ? `bg-gradient-to-r ${builder.gradient} text-white hover:opacity-90`
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}>
+<button
+  disabled={!canStart}
+  onClick={() => {
+    if (!isProMember && totalFreeTriesUsed >= FREE_TRIAL_LIMIT) {
+      openUpgradeModal(`You've used all ${FREE_TRIAL_LIMIT} free AI sessions. Upgrade to Pro for unlimited access.`);
+      return;
+    }
+
+    setSessionStarted(true);
+  }}
+  className={`w-full py-4 rounded-2xl text-base font-bold transition flex items-center justify-center gap-3 shadow-lg ${
+    canStart
+      ? `bg-gradient-to-r ${builder.gradient} text-white hover:opacity-90`
+      : "bg-gray-100 text-gray-400 cursor-not-allowed"
+  }`}>
           <Sparkles className="w-5 h-5" />
           Start AI Session
           {canStart && (
@@ -3513,11 +3546,14 @@ const BuilderDetailPage: React.FC<{
           )}
         </button>
 
-        {!isProMember && (
-          <p className="text-xs text-amber-600 flex items-center gap-1">
-            <Star className="w-3.5 h-3.5" /> Pro membership required for live AI sessions
-          </p>
-        )}
+{!isProMember && (
+  <p className="text-xs text-amber-600 flex items-center gap-1">
+    <Star className="w-3.5 h-3.5" />
+    {totalFreeTriesUsed >= FREE_TRIAL_LIMIT
+      ? "Free sessions used up — upgrade to Pro for unlimited access"
+      : `Free session ${totalFreeTriesUsed + 1} of ${FREE_TRIAL_LIMIT}`}
+  </p>
+)}
       </div>
     </div>
   );
@@ -3698,31 +3734,56 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
   const [showHistory, setShowHistory] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<SessionHistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const loadHistory = async () => {
-    if (!userId) return;
-    setHistoryLoading(true);
-    const records = await loadUserHistory(userId);
-    setHistoryRecords(records);
+const loadHistory = async () => {
+  if (!userId) {
+    setHistoryError("userId not provided — session counts won't work.");
+    return;
+  }
+  setHistoryLoading(true);
+  setHistoryError(null);
+  try {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      AI_BUILDER_HISTORY_COLLECTION_ID,
+      [Query.equal("userId", userId), Query.orderDesc("completedAt"), Query.limit(50)]
+    );
+    setHistoryRecords(res.documents as unknown as SessionHistoryRecord[]);
+  } catch (e: any) {
+    console.warn("Could not load session history:", e);
+    setHistoryError(`Appwrite error: ${e?.message ?? "unknown"}`);
+  } finally {
     setHistoryLoading(false);
-  };
+  }
+};
 
   // Load history count on mount so the number shows on the card
   useEffect(() => {
     if (userId) loadHistory();
   }, [userId]);
 
-  if (activeBuilder) {
-    return (
-      <BuilderDetailPage
-        builder={activeBuilder}
-        isProMember={isProMember}
-        onBack={() => setActiveBuilder(null)}
-        openUpgradeModal={openUpgradeModal}
-        userId={userId}
-      />
-    );
-  }
+  const totalFreeTriesUsed = historyRecords.length;
+const totalFreeTriesRemaining = Math.max(0, FREE_TRIAL_LIMIT - totalFreeTriesUsed);
+
+const getBuilderSessionCount = (builderId: BuilderId) =>
+  historyRecords.filter((r) => r.builderType === builderId).length;
+
+if (activeBuilder) {
+  return (
+    <BuilderDetailPage
+      builder={activeBuilder}
+      isProMember={isProMember}
+      totalFreeTriesUsed={totalFreeTriesUsed}
+      totalFreeTriesRemaining={totalFreeTriesRemaining}
+      builderSessionCount={getBuilderSessionCount(activeBuilder.id)}
+      onSessionComplete={loadHistory}
+      onBack={() => setActiveBuilder(null)}
+      openUpgradeModal={openUpgradeModal}
+      userId={userId}
+    />
+  );
+}
 
   if (showHistory) {
     return (
@@ -3737,6 +3798,11 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
 
   return (
     <div className="space-y-8">
+	{historyError && (
+  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+    ⚠️ Session history error: {historyError}
+  </div>
+)}
       <div>
         <button onClick={onBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium mb-4">
           <ArrowLeft className="w-5 h-5" />Back to Dashboard
@@ -3779,10 +3845,12 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {BUILDERS.map((b) => {
-            const Icon = b.icon;
-            return (
-              <button key={b.id} onClick={() => setActiveBuilder(b)}
+{BUILDERS.map((b) => {
+  const Icon = b.icon;
+  const builderSessionCount = historyRecords.filter((r) => r.builderType === b.id).length;
+
+  return (
+    <button key={b.id} onClick={() => setActiveBuilder(b)}
                 className={`group bg-white rounded-2xl border-2 ${b.border} p-5 text-left hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400`}>
                 <div className="flex items-start gap-3 mb-3">
                   <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${b.gradient} flex items-center justify-center shrink-0 shadow-sm`}>
@@ -3793,10 +3861,17 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
                     <p className="text-xs text-gray-500 mt-0.5 leading-tight">{b.subtitle}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${b.tag}`}>{TOPICS.length} topics</span>
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">AI-powered</span>
-                </div>
+<div className="flex items-center gap-2 mb-3 flex-wrap">
+  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${b.tag}`}>
+    {TOPICS.length} topics
+  </span>
+  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+    AI-powered
+  </span>
+  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+    {builderSessionCount} session{builderSessionCount !== 1 ? "s" : ""}
+  </span>
+</div>
                 <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">{b.description}</p>
                 <div className={`mt-3 flex items-center gap-1 text-xs font-semibold ${b.accent} group-hover:gap-2 transition-all`}>
                   Start Builder <ChevronRight className="w-3.5 h-3.5" />
@@ -3812,8 +3887,12 @@ const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgr
       {!isProMember && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="font-bold text-amber-800">Unlock AI Skill Builders with Pro</p>
-            <p className="text-sm text-amber-700 mt-0.5">Unlimited AI-powered sessions, personalized feedback and all 9 builders.</p>
+<p className="font-bold text-amber-800">
+  {historyRecords.length >= FREE_TRIAL_LIMIT
+    ? `You've used all ${FREE_TRIAL_LIMIT} free sessions`
+    : `${Math.max(0, FREE_TRIAL_LIMIT - historyRecords.length)} free session${Math.max(0, FREE_TRIAL_LIMIT - historyRecords.length) !== 1 ? "s" : ""} remaining`}
+</p>
+            <p className="text-sm text-amber-700 mt-0.5">Upgrade to Pro for unlimited AI-powered sessions and all 9 builders.</p>
           </div>
           <button onClick={() => openUpgradeModal("Upgrade to Pro to unlock unlimited AI Skill Builder sessions.")}
             className="shrink-0 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-xl transition shadow">

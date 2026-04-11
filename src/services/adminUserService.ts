@@ -8,6 +8,7 @@ type CreateAdminUserPayload = {
   role: string;
   accountStatus: string;
   emailVerified: boolean;
+  partnerName?: string | null;
 };
 
 export const createAdminUser = async (payload: CreateAdminUserPayload) => {

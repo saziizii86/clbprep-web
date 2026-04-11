@@ -382,10 +382,10 @@ function Part1Correspondence({ scenario, onBack, onComplete }: ReadingTestProps)
               const match = part.match(/^\{(\d+)\}$/);
               if (!match) return <span key={idx}>{part}</span>;
               const qNum = parseInt(match[1], 10);
-              const blankIndex = qNum - 6;
+              const blankIndex = qNum - 7;
               return (
-                <select key={idx} value={selectedAnswers[qNum] ?? ''}
-                  onChange={(e) => handleAnswerSelect(qNum, parseInt(e.target.value))}
+                <select key={idx} value={selectedAnswers[qNum - 1] ?? ''}
+                  onChange={(e) => handleAnswerSelect(qNum - 1, parseInt(e.target.value))}
                   disabled={isSubmitted}
                   className="px-2 py-1 border border-gray-300 rounded-lg text-sm bg-white mx-1 focus:outline-none focus:ring-2 focus:ring-green-500">
                   <option value="" disabled hidden />

@@ -16,7 +16,7 @@ import {
   BarChart3, TrendingUp, Award, X, Save, Eye, ChevronDown, ChevronUp, CheckCircle,
   Play, Clock, AlertCircle, ToggleLeft, ToggleRight, Pause, Volume2,
   VolumeX, ChevronLeft, ChevronRight, List, SkipBack, SkipForward,
-  FileCheck, ArrowLeft, Send, Zap  // <-- ADD Zap HERE
+  FileCheck, ArrowLeft, Send, Zap, RotateCcw
 } from 'lucide-react';
 
 
@@ -1078,6 +1078,25 @@ const handleDeleteStudent = async (student: any) => {
 } catch (error: any) {
     console.error("Delete error:", error);
     alert("Failed to delete student: " + (error?.message || "Unknown error"));
+  }
+};
+
+const resetUserBuilderHistory = async (student: any) => {
+  if (!confirm(`Clear all AI Builder history for "${student.name}"?`)) return;
+  try {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      "ai_builder_history",
+      [Query.equal("userId", student.$id), Query.limit(100)]
+    );
+    await Promise.all(
+      res.documents.map(doc =>
+        databases.deleteDocument(DATABASE_ID, "ai_builder_history", doc.$id)
+      )
+    );
+    alert(`Cleared ${res.documents.length} AI Builder sessions for ${student.name}.`);
+  } catch (e: any) {
+    alert(`Error: ${e.message}`);
   }
 };
   
@@ -8681,6 +8700,13 @@ const filteredStudents = onlyStudents.filter((student: any) => {
     >
       <Trash2 className="w-4 h-4" />
       Delete
+    </button>
+	<button
+      onClick={() => resetUserBuilderHistory(student)}
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+    >
+      <RotateCcw className="w-4 h-4" />
+      Reset AI
     </button>
   </div>
 </td>

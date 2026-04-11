@@ -4,9 +4,11 @@ import Home from "./pages/home";
 import Login from "./pages/login";
 import UserHome from "./pages/userHome";
 import Admin from "./pages/admin";
+import PartnerAdmin from "./pages/partnerAdmin";              // ← ADD
 import VerifyPage from "./pages/verify";
-import ProtectedRoute from "./components/ProtectedRoute";   // ← ADD
-import AdminRoute from "./components/AdminRoute";           // ← ADD
+import ProtectedRoute from "./components/ProtectedRoute";
+import AdminRoute from "./components/AdminRoute";
+import PartnerAdminRoute from "./components/PartnerAdminRoute"; // ← ADD
 
 function App() {
   return (
@@ -17,8 +19,9 @@ function App() {
         <Route path="/login" element={<Login />} />
         
         {/* Protected routes */}
-        <Route path="/userhome" element={<ProtectedRoute><UserHome /></ProtectedRoute>} />   {/* ← CHANGED */}
-        <Route path="/admin"    element={<AdminRoute><Admin /></AdminRoute>} />              {/* ← CHANGED */}
+        <Route path="/userhome" element={<ProtectedRoute><UserHome /></ProtectedRoute>} />
+        <Route path="/admin"    element={<AdminRoute><Admin /></AdminRoute>} />
+        <Route path="/partner-admin" element={<PartnerAdminRoute><PartnerAdmin /></PartnerAdminRoute>} /> {/* ← ADD */}
         
         {/* Email verification */}
         <Route path="/verify" element={<VerifyPage />} />

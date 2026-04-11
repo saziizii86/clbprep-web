@@ -10,7 +10,11 @@ const STRIPE_SERVER_URL =
 	
 	const DELETE_ACCOUNT_FUNCTION_ID =
   (import.meta.env.VITE_DELETE_ACCOUNT_FUNCTION_ID || "").trim();
-
+const PARTNER_RENEWAL_REQUESTS_COLLECTION_ID =
+  (import.meta.env.VITE_PARTNER_RENEWAL_REQUESTS_COLLECTION_ID || "").trim();
+const PARTNER_ELIGIBILITY_COLLECTION_ID =
+  (import.meta.env.VITE_PARTNER_ELIGIBILITY_COLLECTION_ID || "").trim();
+  
 import ListeningPracticeTest from "../pages/Listening/1. Problem Solving/ListeningPracticeTest";
 import ListeningDailyLifeConversationTest from "../pages/Listening/2. Daily Life Conversation/ListeningDailyLifeConversationTest";
 import ListeningForInformationPracticeTest from './Listening/3. Listening for Information/ListeningForInformationPracticeTest';
@@ -57,7 +61,7 @@ import FeedbackPage from "./feedback";
 
 
 import { account, databases, functions, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
-import { Query } from "appwrite";
+import { Query, ID } from "appwrite";
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useState, useEffect } from 'react';
 import { 
@@ -300,7 +304,53 @@ useEffect(() => {
   }
 }, [location.search]);
 
+	const handleRequestRenewal = async () => {
+  if (renewalRequested || renewalLoading) return;
+  setRenewalLoading(true);
+  try {
+    const me = await account.get();
+    const email = me.email.trim().toLowerCase();
+
+    const existing = await databases.listDocuments(
+      DATABASE_ID, PARTNER_RENEWAL_REQUESTS_COLLECTION_ID, [
+        Query.equal("email", email),
+        Query.equal("status", "pending"),
+      ]
+    );
+    if (existing.documents.length > 0) {
+      setRenewalRequested(true);
+      setRenewalLoading(false);
+      return;
+    }
+
+    const eligRes = await databases.listDocuments(
+      DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, [
+        Query.equal("email", email),
+      ]
+    );
+    const partnerName = (eligRes.documents[0] as any)?.partnerName || "unknown";
+
+    await databases.createDocument(
+      DATABASE_ID, PARTNER_RENEWAL_REQUESTS_COLLECTION_ID,
+      ID.unique(), {
+        partnerName,
+        email,
+        userId: userRowId || me.$id,
+        userName: settingsForm.displayName || me.name || "",
+        requestedAt: new Date().toISOString(),
+        status: "pending",
+      }
+    );
+    setRenewalRequested(true);
+ } catch (e) {
+    console.error("Renewal request failed:", e);
+  }
+  setRenewalLoading(false);
+};
+
 useEffect(() => {
+
+
   const loadSubscription = async () => {
     try {
       const me = await account.get();
@@ -330,12 +380,13 @@ useEffect(() => {
         parsedHistory = [];
       }
 
+const isPartner = userDoc.subscriptionSource === "partner";
       setSubscription({
         plan: userDoc.subscriptionPlan || "basic",
         status: userDoc.subscriptionStatus || "inactive",
         paidAt: userDoc.subscriptionPaidAt || null,
-        startAt: userDoc.subscriptionStartAt || null,
-        endAt: userDoc.subscriptionEndAt || null,
+        startAt: isPartner ? userDoc.claimedAt || null : userDoc.subscriptionStartAt || null,
+        endAt: isPartner ? userDoc.proUntil || null : userDoc.subscriptionEndAt || null,
         sessionId: userDoc.stripeCheckoutSessionId || null,
         customerId: userDoc.stripeCustomerId || null,
         subscriptionId: userDoc.stripeSubscriptionId || null,
@@ -552,6 +603,8 @@ const [activeSpeakingPart8, setActiveSpeakingPart8] = useState<any>(null);
 
 const [showMockTest, setShowMockTest] = useState(false);
 const [mockTestPart, setMockTestPart] = useState(1); // ✅ 1..6
+const [renewalRequested, setRenewalRequested] = useState(false);
+const [renewalLoading, setRenewalLoading] = useState(false);
 const [backFromPart2, setBackFromPart2] = useState(false);
 // ✅ Pre-fetched mock material cache — keyed by material id
 const [mockMaterialsCache, setMockMaterialsCache] = useState<Map<string, any>>(new Map());
@@ -2546,6 +2599,44 @@ const planLabels: Record<string, string> = {
       
       </div>
 
+
+      {/* Partner access expiry warning banner */}
+      {isProMember && subscription.plan === "partner" && subscription.endAt && (() => {
+        const daysRemaining = Math.ceil((new Date(subscription.endAt).getTime() - Date.now()) / 86400000);
+        if (daysRemaining > 14) return null;
+        return (
+          <div className={`rounded-xl p-4 mb-2 flex items-center justify-between gap-4 ${
+            daysRemaining <= 0 ? "bg-red-50 border border-red-200" : "bg-amber-50 border border-amber-200"
+          }`}>
+            <div>
+              <p className={`font-semibold text-sm ${daysRemaining <= 0 ? "text-red-700" : "text-amber-800"}`}>
+                {daysRemaining <= 0
+                  ? "Your sponsored access has expired"
+                  : `Your sponsored access expires in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}`}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {daysRemaining <= 0
+                  ? "Contact your organization to request renewal."
+                  : "If you are still eligible, contact your organization or request a renewal below."}
+              </p>
+            </div>
+{daysRemaining > 0 && daysRemaining <= 14 && (
+              <button
+                onClick={handleRequestRenewal}
+                disabled={renewalRequested || renewalLoading}
+                className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium ${
+                  renewalRequested
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "bg-amber-600 text-white hover:bg-amber-700"
+                }`}
+              >
+                {renewalLoading ? "Sending..." : renewalRequested ? "Request sent" : "Request renewal"}
+              </button>
+            )}
+          </div>
+        );
+      })()}
+	  
       {/* Mock Test Experience Banner */}
       <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-xl p-4 text-white shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

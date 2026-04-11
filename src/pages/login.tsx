@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ID, Query } from "appwrite";
 import { X } from "lucide-react";
-import SEO from "../components/SEO";
 
 // ✅ Update this path to wherever your Appwrite client is
 // Must export: account, databases, DATABASE_ID, USERS_COLLECTION_ID
@@ -172,7 +171,7 @@ export default function Login() {
     ]);
 
     const role = res.documents.length ? (res.documents[0] as any).role : "user";
-    nav(role === "admin" ? "/admin" : "/userhome", { replace: true });
+    nav(role === "admin" ? "/admin" : role === "partner_admin" ? "/partner-admin" : "/userhome", { replace: true });
   };
 
 const redirectAfterAuth = async (emailForLookup: string) => {
@@ -300,12 +299,60 @@ const redirectAfterAuth = async (emailForLookup: string) => {
     }
 
     await ensureUserRow(cleanEmail, me.name || "");
+    await checkAndActivatePartnerAccess(cleanEmail);
     await markUserLoggedIn(cleanEmail);
     await redirectAfterAuth(cleanEmail);
   } catch (error: any) {
     setErr(error?.message ?? "Login failed");
   } finally {
     setLoading(false);
+  }
+};
+
+const checkAndActivatePartnerAccess = async (email: string) => {
+  try {
+    const PARTNER_ELIGIBILITY_COLLECTION_ID =
+      import.meta.env.VITE_PARTNER_ELIGIBILITY_COLLECTION_ID || "partner_eligibility";
+
+    const result = await databases.listDocuments(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, [
+      Query.equal("email", email.toLowerCase()),
+      Query.equal("status", "approved"),
+    ]);
+
+    if (!result.documents.length) return;
+
+    const eligDoc = result.documents[0] as any;
+
+    const now = new Date();
+    const endAt = new Date(now);
+    endAt.setDate(endAt.getDate() + (eligDoc.durationDays || 90));
+    const endAtISO = endAt.toISOString();
+
+    // find the user row
+    const userRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+      Query.equal("email", email.toLowerCase()),
+    ]);
+    if (!userRes.documents.length) return;
+    const userDoc = userRes.documents[0];
+
+    // activate Pro on the user
+    await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, userDoc.$id, {
+      subscriptionStatus: "active",
+      subscriptionPlan: "partner",
+      subscriptionSource: "partner",
+      proUntil: endAtISO,
+    });
+
+    // mark eligibility as claimed
+    await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, eligDoc.$id, {
+      status: "claimed",
+      claimedByUserId: userDoc.$id,
+      claimedAt: now.toISOString(),
+      endAt: endAtISO,
+      updatedAt: now.toISOString(),
+    });
+  } catch (e) {
+    console.error("Partner access check failed:", e);
   }
 };
 const onSignup = async (e: React.FormEvent) => {
@@ -326,9 +373,10 @@ const onSignup = async (e: React.FormEvent) => {
       return;
     }
 
-    await account.create(ID.unique(), cleanEmail, password, displayName || undefined);
+await account.create(ID.unique(), cleanEmail, password, displayName || undefined);
     await account.createEmailPasswordSession(cleanEmail, password);
     await ensureUserRow(cleanEmail, displayName);
+    await checkAndActivatePartnerAccess(cleanEmail);
     // NOTE: do NOT markUserLoggedIn — user must verify first
 
     // Send verification email via our Function + Resend
@@ -360,12 +408,6 @@ const onSignup = async (e: React.FormEvent) => {
 
   return (
     <>
-	
-	      <SEO
-        title="Login to CLBPrep"
-        description="Log in to access CELPIP practice tests and track your progress."
-        canonical="/login"
-      />
       <PolicyModal type={openModal} onClose={() => setOpenModal(null)} />
 
       {showVerifyScreen ? (

@@ -422,6 +422,7 @@ const [createUserForm, setCreateUserForm] = useState({
   role: "user",
   accountStatus: "active",
   emailVerified: true,
+  partnerName: "",
 });
 const [isCreatingUser, setIsCreatingUser] = useState(false);
 
@@ -618,6 +619,7 @@ const result = await createAdminUser({
       role: createUserForm.role,
       accountStatus: createUserForm.accountStatus,
       emailVerified: createUserForm.emailVerified,
+      partnerName: createUserForm.partnerName?.trim() || null,
     });
 
     alert(`User "${result.name}" created successfully!`);
@@ -637,6 +639,7 @@ const result = await createAdminUser({
         email: createUserForm.email.trim(),
         role: createUserForm.role,
         accountStatus: createUserForm.accountStatus || "active",
+		partnerName: createUserForm.partnerName?.trim() || null,
         subscriptionPlan: "basic",
         subscriptionStatus: "inactive",
         subscriptionPaidAt: null,
@@ -8723,6 +8726,7 @@ const filteredStudents = onlyStudents.filter((student: any) => {
           >
             <option value="user">user</option>
             <option value="admin">admin</option>
+			<option value="partner_admin">partner_admin</option>
           </select>
         </div>
 
@@ -9516,8 +9520,24 @@ const providerModels = {
                 >
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
+				  <option value="partner_admin">Partner Admin</option>
                 </select>
               </div>
+			  
+{createUserForm.role === 'partner_admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Partner Name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={createUserForm.partnerName || ''}
+                    onChange={(e) => setCreateUserForm(prev => ({ ...prev, partnerName: e.target.value }))}
+                    placeholder="e.g. YMCA, Halifax Library"
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">This name links the admin to their partner data.</p>
+                </div>
+              )}
+			  
               <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
                 <div>
                   <p className="text-sm font-medium text-gray-700">Mark Email as Verified</p>

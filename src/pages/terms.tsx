@@ -132,10 +132,10 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
 
           <Section title="8. AI-Generated Content">
             <p>
-              Some features use AI tools to generate feedback, scoring suggestions, and practice content.
-              AI-generated outputs are provided for educational purposes only. Accuracy is not guaranteed,
-              and results on this platform do not predict or guarantee performance on the actual CELPIP exam.
-            </p>
+  Most or all content on CLBPrep is generated, assisted, or enhanced by artificial intelligence tools.
+  AI-generated outputs are provided for educational purposes only. Accuracy is not guaranteed,
+  and results on this platform do not predict or guarantee performance on the actual CELPIP exam.
+</p>
           </Section>
 
           <Section title="9. Intellectual Property">

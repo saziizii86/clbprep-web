@@ -356,31 +356,49 @@ function SiteHeader({
 
   return (
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur">
-<div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5">
-  <a href="/" className="flex items-center">
-    <img src="/CLBPrep.png" alt="CLBPrep" className="h-24 w-auto object-contain" />
-  </a>
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5">
+        <a href="/" className="flex items-center">
+          <img src="/CLBPrep.png" alt="CLBPrep" className="h-24 w-auto object-contain" />
+        </a>
 
         {/* Desktop nav */}
-        <nav className="hidden items-center gap-6 text-sm text-slate-700 md:flex">
-          <a className="hover:text-slate-950" href="#practice">
+        <nav className="hidden items-center gap-1 md:flex">
+          <a
+            className="group flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold text-slate-600 transition-all hover:bg-indigo-50 hover:text-indigo-700"
+            href="#practice"
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600 transition-colors group-hover:bg-indigo-100 group-hover:text-indigo-600">
+              <BookOpen className="h-4 w-4" />
+            </span>
             Practice Tests
           </a>
-          <a className="hover:text-slate-950" href="#about">
+          <a
+            className="group flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold text-slate-600 transition-all hover:bg-indigo-50 hover:text-indigo-700"
+            href="#about"
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-600 transition-colors group-hover:bg-indigo-100 group-hover:text-indigo-600">
+              <Star className="h-4 w-4" />
+            </span>
             About CELPIP
           </a>
           <button
             type="button"
-            className="hover:text-slate-950"
+            className="group flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold text-slate-600 transition-all hover:bg-indigo-50 hover:text-indigo-700"
             onClick={onOpenPricing}
           >
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-100 text-purple-600 transition-colors group-hover:bg-indigo-100 group-hover:text-indigo-600">
+              <Sparkles className="h-4 w-4" />
+            </span>
             Pricing
           </button>
           <button
             type="button"
-            className="hover:text-slate-950"
+            className="group flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold text-slate-600 transition-all hover:bg-indigo-50 hover:text-indigo-700"
             onClick={onOpenContact}
           >
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-100 text-green-600 transition-colors group-hover:bg-indigo-100 group-hover:text-indigo-600">
+              <Headphones className="h-4 w-4" />
+            </span>
             Contact
           </button>
         </nav>
@@ -410,30 +428,52 @@ function SiteHeader({
         <div className="md:hidden" id={panelId}>
           <div className="border-t bg-white">
             <div className="mx-auto max-w-6xl px-4 py-4">
-              <nav className="grid gap-3 text-sm text-slate-800">
+              <nav className="grid gap-1 text-slate-800">
                 <a
-                  className="rounded-xl px-3 py-2 hover:bg-slate-50"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-[15px] font-semibold transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                   href="#practice"
                   onClick={() => setOpen(false)}
                 >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                    <BookOpen className="h-4 w-4" />
+                  </span>
                   Practice Tests
                 </a>
                 <a
-                  className="rounded-xl px-3 py-2 hover:bg-slate-50"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-[15px] font-semibold transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                   href="#about"
                   onClick={() => setOpen(false)}
                 >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+                    <Star className="h-4 w-4" />
+                  </span>
                   About CELPIP
                 </a>
                 <button
                   type="button"
-                  className="rounded-xl px-3 py-2 text-left hover:bg-slate-50"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-[15px] font-semibold transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                   onClick={() => {
                     setOpen(false);
                     onOpenPricing();
                   }}
                 >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100 text-purple-600">
+                    <Sparkles className="h-4 w-4" />
+                  </span>
                   Pricing
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-[15px] font-semibold transition-colors hover:bg-indigo-50 hover:text-indigo-700"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenContact();
+                  }}
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 text-green-600">
+                    <Headphones className="h-4 w-4" />
+                  </span>
+                  Contact
                 </button>
 
                 <div className="mt-2 grid gap-2">

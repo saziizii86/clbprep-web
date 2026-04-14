@@ -80,6 +80,7 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
     <li>One-time plans provide full access for the purchased duration with no automatic renewal.</li>
     <li>Recurring plans renew monthly and can be cancelled at any time.</li>
     <li>All prices are in Canadian dollars (CAD) and are subject to change.</li>
+	<li>Applicable taxes may be added at checkout unless stated otherwise.</li>
     <li>Payments are processed securely via Stripe. We do not store your card details.</li>
     <li>Access expires at the end of the purchased period.</li>
   </ul>
@@ -109,6 +110,9 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
             <p className="mt-3">
               By proceeding to checkout, you confirm that you have read and understood this no-refund policy.
             </p>
+			<p className="mt-3">
+  These Terms do not remove any legal rights that customers have under the law.
+</p>
           </Section>
 
           <Section title="7. Acceptable Use">

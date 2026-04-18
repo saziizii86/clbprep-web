@@ -9,6 +9,7 @@ import VerifyPage from "./pages/verify";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import PartnerAdminRoute from "./components/PartnerAdminRoute"; // ← ADD
+import OrgPartnerAdmin from "./pages/OrgPartnerAdmin";
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="/userhome" element={<ProtectedRoute><UserHome /></ProtectedRoute>} />
         <Route path="/admin"    element={<AdminRoute><Admin /></AdminRoute>} />
         <Route path="/partner-admin" element={<PartnerAdminRoute><PartnerAdmin /></PartnerAdminRoute>} /> {/* ← ADD */}
+		<Route path="/org-partner-admin" element={<ProtectedRoute><OrgPartnerAdmin /></ProtectedRoute>} />
         
         {/* Email verification */}
         <Route path="/verify" element={<VerifyPage />} />

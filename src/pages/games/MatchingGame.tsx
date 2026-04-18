@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { ArrowLeft, RefreshCw, Trophy, Clock, Eye, Loader2 } from "lucide-react";
 import { generateGameContent } from "./gameAI";
-
+import { startSession, stopSession } from "./sessionTracker";
 interface GameConfig { topic: string; difficulty: string; duration: number; }
 interface Props { config: GameConfig; onBack: () => void; }
 interface Pair { word: string; definition: string; }
@@ -65,6 +65,14 @@ Return ONLY a JSON array: [{"word":"vocabulary","definition":"range of known wor
     const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, gameOver, isGenerating]);
+  
+  // ── Session tracking ──────────────────────────
+useEffect(() => {
+  if (!isGenerating && !genError) {
+    startSession("mg", "Matching Game", "vocabulary", config.topic, config.difficulty);
+  }
+  return () => stopSession();
+}, [isGenerating, genError]);
 
   useEffect(() => { if (matches === pairCount && pairCount > 0) setGameOver(true); }, [matches, pairCount]);
 

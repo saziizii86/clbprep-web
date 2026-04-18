@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, RefreshCw, Trophy, Clock, ChevronRight, Loader2 } from "lucide-react";
 import { generateGameContent } from "./gameAI";
-
+import { startSession, stopSession } from "./sessionTracker";
 interface GameConfig { topic: string; difficulty: string; duration: number; }
 interface Props { config: GameConfig; onBack: () => void; }
 interface Sentence { words: string[]; correct: string; hint: string; }
@@ -58,6 +58,14 @@ Return ONLY a JSON array: [{"sentence":"Full correct sentence here.","hint":"2-w
     const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, gameOver, isGenerating]);
+  
+  // ── Session tracking ──────────────────────────
+useEffect(() => {
+  if (!isGenerating && !genError) {
+    startSession("sb", "Sentence Builder", "grammar", config.topic, config.difficulty);
+  }
+  return () => stopSession();
+}, [isGenerating, genError]);
 
   const fmt = (s: number) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
   const current = sentences[idx];

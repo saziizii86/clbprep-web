@@ -5,6 +5,7 @@ import { generateGameContent } from "./gameAI";
 import { getAPISettings } from "../../services/settingsService";
 
 interface GameConfig { topic: string; difficulty: string; duration: number; }
+import { startSession, stopSession } from "./sessionTracker";
 interface Props { config: GameConfig; onBack: () => void; }
 
 const GRID_SIZE = 14;
@@ -131,6 +132,14 @@ Return ONLY a JSON array: [{"word":"COMMUTE","meaning":"travel to work daily","e
     const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, gameOver, isGenerating]);
+  
+  // ── Session tracking ──────────────────────────
+useEffect(() => {
+  if (!isGenerating && !genError) {
+    startSession("ws", "Word Search", "vocabulary", config.topic, config.difficulty);
+  }
+  return () => stopSession();
+}, [isGenerating, genError]);
 
   useEffect(() => {
     if (foundWords.length === words.length && words.length > 0) setGameOver(true);

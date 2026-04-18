@@ -12,6 +12,7 @@ import FillInTheBlank from "./FillInTheBlank";
 import ListeningPuzzle from "./ListeningPuzzle";
 import DialogueCompletion from "./DialogueCompletion";
 
+
 interface GameConfig { topic: string; difficulty: string; duration: number | null; }
 
 const TOPIC_ICONS: Record<string, string> = {

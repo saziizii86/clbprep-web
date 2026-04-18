@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { generateGameContent } from "./gameAI";
 import { ArrowLeft, RefreshCw, Trophy, Clock, ChevronRight, MessageSquare, User } from "lucide-react";
-
+import { startSession, stopSession } from "./sessionTracker";
 interface GameConfig { topic: string; difficulty: string; duration: number; }
 interface Props { config: GameConfig; onBack: () => void; }
 
@@ -152,6 +152,14 @@ Return ONLY a JSON array:
     const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, gameOver, isGenerating]);
+  
+  // ── Session tracking ──────────────────────────
+useEffect(() => {
+  if (!isGenerating && !genError) {
+    startSession("dc", "Dialogue Completion", "speaking", config.topic, config.difficulty);
+  }
+  return () => stopSession();
+}, [isGenerating, genError]);
 
   const handleSelect = (opt: string) => {
     if (feedback) return;

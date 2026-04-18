@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { ArrowLeft, Play, RefreshCw, Trophy, Clock, Volume2, ChevronRight, Loader2 } from "lucide-react";
 import { getAPISettings } from "../../services/settingsService";
 import { generateGameContent } from "./gameAI";
+import { startSession, stopSession } from "./sessionTracker";
 
 interface GameConfig { topic: string; difficulty: string; duration: number; }
 interface Props { config: GameConfig; onBack: () => void; }
@@ -203,6 +204,14 @@ Return ONLY a JSON array: [{"sentence":"She forgot to pay the electricity bill l
     const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, gameOver, isGenerating]);
+
+// ── Session tracking ──────────────────────────
+useEffect(() => {
+  if (!isGenerating && !genError) {
+    startSession("lp", "Listening Puzzle", "listening", config.topic, config.difficulty);
+  }
+  return () => stopSession();
+}, [isGenerating, genError]);
 
   // Cleanup audio on unmount
   useEffect(() => {

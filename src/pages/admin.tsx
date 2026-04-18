@@ -367,6 +367,7 @@ Provide your evaluation in JSON format:
 const [students, setStudents] = useState<any[]>([]);
 const [studentsLoading, setStudentsLoading] = useState(false);
 const [studentSearchQuery, setStudentSearchQuery] = useState("");
+const [studentSection, setStudentSection] = useState<"learners" | "partner_admins" | "org_partners" | "all">("learners");
 
 type StudentPlan = "basic" | "weekly" | "monthly" | "bimonthly" | "quarterly";
 type TransactionStatus = "inactive" | "active" | "cancelled" | "expired" | "refunded";
@@ -423,6 +424,7 @@ const [createUserForm, setCreateUserForm] = useState({
   accountStatus: "active",
   emailVerified: true,
   partnerName: "",
+  contractSeats: 0,
 });
 const [isCreatingUser, setIsCreatingUser] = useState(false);
 
@@ -437,6 +439,8 @@ const [studentForm, setStudentForm] = useState<{
   subscriptionStartAt: string;
   subscriptionEndAt: string;
   transactionHistory: StudentTransaction[];
+  partnerName: string;
+  contractSeats: number;
 }>({
   name: "",
   role: "user",
@@ -447,6 +451,8 @@ const [studentForm, setStudentForm] = useState<{
   subscriptionStartAt: "",
   subscriptionEndAt: "",
   transactionHistory: [],
+  partnerName: "",
+  contractSeats: 0,
 });
 
 
@@ -620,6 +626,7 @@ const result = await createAdminUser({
       accountStatus: createUserForm.accountStatus,
       emailVerified: createUserForm.emailVerified,
       partnerName: createUserForm.partnerName?.trim() || null,
+      contractSeats: createUserForm.role === "partner_org_admin" ? (createUserForm.contractSeats || 0) : null,
     });
 
     alert(`User "${result.name}" created successfully!`);
@@ -640,6 +647,7 @@ const result = await createAdminUser({
         role: createUserForm.role,
         accountStatus: createUserForm.accountStatus || "active",
 		partnerName: createUserForm.partnerName?.trim() || null,
+        contractSeats: createUserForm.role === "partner_org_admin" ? (createUserForm.contractSeats || 0) : null,
         subscriptionPlan: "basic",
         subscriptionStatus: "inactive",
         subscriptionPaidAt: null,
@@ -731,6 +739,28 @@ const isProActive = (student: any) => {
   if (ageMs <= 10 * 60 * 1000) return "Away";
 
   return "Offline";
+};
+
+const isLearnerRole = (student: any) => {
+  const role = String(student?.role || "user").toLowerCase();
+  return !["admin", "partner_admin", "partner_org_admin"].includes(role);
+};
+
+const isPartnerAdminRole = (student: any) => {
+  const role = String(student?.role || "").toLowerCase();
+  return role === "partner_admin";
+};
+
+const isOrgPartnerRole = (student: any) => {
+  const role = String(student?.role || "").toLowerCase();
+  return role === "partner_org_admin";
+};
+
+const isAnyPartnerRole = (student: any) => isPartnerAdminRole(student) || isOrgPartnerRole(student);
+
+const isPlainAdminRole = (student: any) => {
+  const role = String(student?.role || "").toLowerCase();
+  return role === "admin";
 };
 
 const toDateTimeLocal = (value?: string | null) => {
@@ -903,6 +933,8 @@ const openStudentEditor = (student: any) => {
     subscriptionStartAt: primary?.startAt || toDateTimeLocal(student.subscriptionStartAt),
     subscriptionEndAt: primary?.endAt || toDateTimeLocal(student.subscriptionEndAt),
     transactionHistory: sortTransactionsNewestFirst(transactions),
+    partnerName: student.partnerName || "",
+    contractSeats: student.contractSeats || 0,
   });
 
   setShowStudentEditModal(true);
@@ -1026,6 +1058,12 @@ await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, editingStudent.
       subscriptionStartAt: resolvedStartAt,
       subscriptionEndAt: resolvedEndAt,
       transactionHistory: JSON.stringify(transactions),
+      partnerName: (studentForm.role === "partner_admin" || studentForm.role === "partner_org_admin")
+        ? (studentForm.partnerName?.trim() || null)
+        : null,
+      contractSeats: studentForm.role === "partner_org_admin"
+        ? (studentForm.contractSeats || 0)
+        : null,
     });
 
     // ✅ ADD THIS BLOCK — optimistic local update
@@ -1043,6 +1081,8 @@ await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, editingStudent.
               subscriptionStartAt: resolvedStartAt,
               subscriptionEndAt: resolvedEndAt,
               transactionHistory: JSON.stringify(transactions),
+              partnerName: studentForm.partnerName?.trim() || null,
+              contractSeats: studentForm.contractSeats || 0,
             }
           : s
       )
@@ -8465,35 +8505,48 @@ onClick={() => {
   };
   
     const StudentsView = () => {
-    const onlyStudents = students.filter(
-      (student: any) => (student.role || "user").toLowerCase() !== "admin"
-    );
+    const visibleStudents = students.filter((student: any) => {
+      if (studentSection === "learners") return isLearnerRole(student);
+      if (studentSection === "partner_admins") return isPartnerAdminRole(student);
+      if (studentSection === "org_partners") return isOrgPartnerRole(student);
+      return !isPlainAdminRole(student);
+    });
 
     const q = studentSearchQuery.trim().toLowerCase();
 
-const filteredStudents = onlyStudents.filter((student: any) => {
-  if (!q) return true;
+    const filteredStudents = visibleStudents.filter((student: any) => {
+      if (!q) return true;
 
-  return (
-    (student.name || "").toLowerCase().includes(q) ||
-    (student.email || "").toLowerCase().includes(q) ||
-    (student.accountStatus || "active").toLowerCase().includes(q) ||
-    prettifyPlan(student.subscriptionPlan).toLowerCase().includes(q) ||
-    getSubscriptionState(student).toLowerCase().includes(q) ||
-    getPresenceState(student).toLowerCase().includes(q)
-  );
-});
+      return (
+        (student.name || "").toLowerCase().includes(q) ||
+        (student.email || "").toLowerCase().includes(q) ||
+        (student.partnerName || "").toLowerCase().includes(q) ||
+        (student.accountStatus || "active").toLowerCase().includes(q) ||
+        prettifyPlan(student.subscriptionPlan).toLowerCase().includes(q) ||
+        getSubscriptionState(student).toLowerCase().includes(q) ||
+        getPresenceState(student).toLowerCase().includes(q) ||
+        (student.role || "user").toLowerCase().includes(q)
+      );
+    });
 
-    const activeProCount = onlyStudents.filter((student: any) => isProActive(student)).length;
-    const basicCount = onlyStudents.length - activeProCount;
+    const activeProCount = visibleStudents.filter((student: any) => isProActive(student)).length;
+    const basicCount = visibleStudents.length - activeProCount;
+    const sectionTitle =
+      studentSection === "partner_admins"
+        ? "Partner Admins"
+        : studentSection === "org_partners"
+        ? "Org Partners"
+        : studentSection === "all"
+        ? "All Non-Admin Accounts"
+        : "Students";
 
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-4 gap-6">
           <div className="bg-white rounded-xl p-6 border">
             <Users className="w-6 h-6 text-blue-600 mb-4" />
-            <h3 className="text-2xl font-bold">{onlyStudents.length}</h3>
-            <p className="text-gray-600 text-sm">Total Students</p>
+            <h3 className="text-2xl font-bold">{visibleStudents.length}</h3>
+            <p className="text-gray-600 text-sm">{sectionTitle}</p>
           </div>
 
           <div className="bg-white rounded-xl p-6 border">
@@ -8516,75 +8569,134 @@ const filteredStudents = onlyStudents.filter((student: any) => {
         </div>
 
         <div className="bg-white rounded-xl border">
-          <div className="p-6 border-b flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="relative w-full md:max-w-md">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search by name, email, plan, or status..."
-                value={studentSearchQuery}
-                onChange={(e) => setStudentSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+          <div className="p-6 border-b flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setStudentSection("learners")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                  studentSection === "learners"
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                Students ({students.filter((s: any) => isLearnerRole(s)).length})
+              </button>
+              <button
+                onClick={() => setStudentSection("partner_admins")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                  studentSection === "partner_admins"
+                    ? "bg-purple-600 text-white border-purple-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                Partner Admins ({students.filter((s: any) => isPartnerAdminRole(s)).length})
+              </button>
+              <button
+                onClick={() => setStudentSection("org_partners")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                  studentSection === "org_partners"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                Org Partners ({students.filter((s: any) => isOrgPartnerRole(s)).length})
+              </button>
+              <button
+                onClick={() => setStudentSection("all")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                  studentSection === "all"
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                All Non-Admin ({students.filter((s: any) => !isPlainAdminRole(s)).length})
+              </button>
             </div>
 
-<div className="flex gap-2">
-              <button
-                onClick={() => setShowCreateUserModal(true)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Create User
-              </button>
-<button
-  onClick={syncAuthUsers}
-  disabled={studentsLoading}
-  className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 flex items-center gap-2"
->
-  ⟳ Sync Auth Users
-</button>
-<button
-  onClick={loadStudents}
-  disabled={studentsLoading}
-  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
->
-  {studentsLoading ? "Refreshing..." : "Refresh"}
-</button>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">{sectionTitle}</h3>
+                <p className="text-sm text-gray-500">
+                  {studentSection === "partner_admins"
+                    ? "Manage partner_admin accounts — partners who may also be students."
+                    : studentSection === "org_partners"
+                    ? "Manage partner_org_admin accounts — institutional orgs with contracted seats (e.g. YMCA, libraries)."
+                    : studentSection === "all"
+                    ? "View all non-admin accounts in one place."
+                    : "View all learner accounts and their subscription details."}
+                </p>
+              </div>
+
+              <div className="relative w-full md:max-w-md">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search by name, email, partner, plan, or status..."
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowCreateUserModal(true)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create User
+                </button>
+                <button
+                  onClick={syncAuthUsers}
+                  disabled={studentsLoading}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 flex items-center gap-2"
+                >
+                  ⟳ Sync Auth Users
+                </button>
+                <button
+                  onClick={loadStudents}
+                  disabled={studentsLoading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {studentsLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
             </div>
-			
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full table-auto">
               <thead className="bg-gray-50">
-<tr className="text-left text-sm text-gray-600">
-  <th className="px-3 py-3 whitespace-nowrap">Name</th>
-  <th className="px-3 py-3 min-w-[220px]">Email</th>
-  <th className="px-3 py-3 whitespace-nowrap">Role</th>
-  <th className="px-3 py-3 whitespace-nowrap">Account</th>
-  <th className="px-3 py-3 whitespace-nowrap">Presence</th>
-  <th className="px-3 py-3 whitespace-nowrap">Plan</th>
-  <th className="px-3 py-3 whitespace-nowrap">Subscription</th>
-  <th className="px-3 py-3 whitespace-nowrap">Last Activity</th>
-  <th className="px-3 py-3 whitespace-nowrap">Last Seen</th>
-  <th className="px-3 py-3 whitespace-nowrap">Paid At</th>
-  <th className="px-3 py-3 whitespace-nowrap">Start At</th>
-  <th className="px-3 py-3 whitespace-nowrap">End At</th>
-  <th className="px-3 py-3 whitespace-nowrap text-center">Actions</th>
-</tr>
+                <tr className="text-left text-sm text-gray-600">
+                  <th className="px-3 py-3 whitespace-nowrap">Name</th>
+                  <th className="px-3 py-3 min-w-[220px]">Email</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Role</th>
+                  {(studentSection === "partner_admins" || studentSection === "org_partners") && <th className="px-3 py-3 whitespace-nowrap">Partner</th>}
+                  {studentSection === "org_partners" && <th className="px-3 py-3 whitespace-nowrap">Contracted Seats</th>}
+                  <th className="px-3 py-3 whitespace-nowrap">Account</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Presence</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Plan</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Subscription</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Last Activity</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Last Seen</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Paid At</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Start At</th>
+                  <th className="px-3 py-3 whitespace-nowrap">End At</th>
+                  <th className="px-3 py-3 whitespace-nowrap text-center">Actions</th>
+                </tr>
               </thead>
 
               <tbody>
                 {studentsLoading && filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="px-6 py-10 text-center text-gray-500">
-                      Loading students...
+                    <td colSpan={studentSection === "org_partners" ? 15 : studentSection === "partner_admins" ? 14 : 13} className="px-6 py-10 text-center text-gray-500">
+                      Loading accounts...
                     </td>
                   </tr>
                 ) : filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="px-6 py-10 text-center text-gray-500">
-                      No students found
+                    <td colSpan={studentSection === "org_partners" ? 15 : studentSection === "partner_admins" ? 14 : 13} className="px-6 py-10 text-center text-gray-500">
+                      No accounts found
                     </td>
                   </tr>
                 ) : (
@@ -8592,125 +8704,109 @@ const filteredStudents = onlyStudents.filter((student: any) => {
                     const subscriptionState = getSubscriptionState(student);
 
                     return (
-                    <tr key={student.$id} className="border-t text-sm">
-  <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">
-    {student.name || "-"}
-  </td>
-
-  <td className="px-3 py-3 text-gray-700 min-w-[220px]">
-    {student.email || "-"}
-  </td>
-
-  <td className="px-3 py-3 text-gray-700">
-    {student.role || "user"}
-  </td>
-
-  <td className="px-3 py-3 whitespace-nowrap">
-    <span
-      className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        (student.accountStatus || "active") === "active"
-          ? "bg-blue-100 text-blue-700"
-          : (student.accountStatus || "active") === "blocked"
-          ? "bg-red-100 text-red-700"
-          : "bg-yellow-100 text-yellow-700"
-      }`}
-    >
-      {student.accountStatus || "active"}
-    </span>
-  </td>
-
-  <td className="px-3 py-3 whitespace-nowrap">
-    <span
-      className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        getPresenceState(student) === "Online"
-          ? "bg-green-100 text-green-700"
-          : getPresenceState(student) === "Away"
-          ? "bg-yellow-100 text-yellow-700"
-          : "bg-gray-100 text-gray-700"
-      }`}
-    >
-      {getPresenceState(student)}
-    </span>
-  </td>
-
- <td className="px-3 py-3 whitespace-nowrap">
-    <span
-      className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        student.subscriptionSource === "partner"
-          ? "bg-blue-100 text-blue-700"
-          : isProActive(student)
-          ? "bg-amber-100 text-amber-700"
-          : "bg-gray-100 text-gray-700"
-      }`}
-    >
-      {student.subscriptionSource === "partner"
-        ? `Partner (${student.partnerName || "?"})`
-        : prettifyPlan(student.subscriptionPlan)}
-    </span>
-  </td>
-
-  <td className="px-3 py-3 whitespace-nowrap">
-    <span
-      className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        subscriptionState === "Active"
-          ? "bg-green-100 text-green-700"
-          : subscriptionState === "Expired"
-          ? "bg-red-100 text-red-700"
-          : "bg-gray-100 text-gray-700"
-      }`}
-    >
-      {subscriptionState}
-    </span>
-  </td>
-
-  <td className="px-3 py-3 text-gray-700">
-    {formatDateTime(student.lastActivityAt)}
-  </td>
-
-  <td className="px-3 py-3 text-gray-700">
-    {formatDateTime(student.lastSeenAt)}
-  </td>
-
-  <td className="px-3 py-3 text-gray-700">
-    {formatDateTime(student.subscriptionPaidAt)}
-  </td>
-
-  <td className="px-3 py-3 text-gray-700">
-    {formatDateTime(student.subscriptionStartAt)}
-  </td>
-
-<td className="px-3 py-3 text-gray-700">
-    {student.subscriptionSource === "partner"
-      ? formatDateTime(student.proUntil)
-      : formatDateTime(student.subscriptionEndAt)}
-  </td>
-
-<td className="px-3 py-3 text-gray-700">
-  <div className="flex items-center gap-2">
-    <button
-      onClick={() => openStudentEditor(student)}
-      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-    >
-      <Edit className="w-4 h-4" />
-      Edit
-    </button>
-    <button
-      onClick={() => handleDeleteStudent(student)}
-      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700"
-    >
-      <Trash2 className="w-4 h-4" />
-      Delete
-    </button>
-	<button
-      onClick={() => resetUserBuilderHistory(student)}
-      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600"
-    >
-      <RotateCcw className="w-4 h-4" />
-      Reset AI
-    </button>
-  </div>
-</td>
-</tr>
+                      <tr key={student.$id} className="border-t text-sm">
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{student.name || "-"}</td>
+                        <td className="px-3 py-3 text-gray-700 min-w-[220px]">{student.email || "-"}</td>
+                        <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{student.role || "user"}</td>
+                        {(studentSection === "partner_admins" || studentSection === "org_partners") && (
+                          <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{student.partnerName || "-"}</td>
+                        )}
+                        {studentSection === "org_partners" && (
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            {student.contractSeats
+                              ? <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">{student.contractSeats} seats</span>
+                              : <span className="text-gray-400 text-xs">Not set</span>}
+                          </td>
+                        )}
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                              (student.accountStatus || "active") === "active"
+                                ? "bg-blue-100 text-blue-700"
+                                : (student.accountStatus || "active") === "blocked"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
+                            {student.accountStatus || "active"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                              getPresenceState(student) === "Online"
+                                ? "bg-green-100 text-green-700"
+                                : getPresenceState(student) === "Away"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {getPresenceState(student)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                              student.subscriptionSource === "partner"
+                                ? "bg-blue-100 text-blue-700"
+                                : isProActive(student)
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {student.subscriptionSource === "partner"
+                              ? `Partner (${student.partnerName || "?"})`
+                              : prettifyPlan(student.subscriptionPlan)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                              subscriptionState === "Active"
+                                ? "bg-green-100 text-green-700"
+                                : subscriptionState === "Expired"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {subscriptionState}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-gray-700">{formatDateTime(student.lastActivityAt)}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatDateTime(student.lastSeenAt)}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatDateTime(student.subscriptionPaidAt)}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatDateTime(student.subscriptionStartAt)}</td>
+                        <td className="px-3 py-3 text-gray-700">
+                          {student.subscriptionSource === "partner"
+                            ? formatDateTime(student.proUntil)
+                            : formatDateTime(student.subscriptionEndAt)}
+                        </td>
+                        <td className="px-3 py-3 text-gray-700">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openStudentEditor(student)}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              <Edit className="w-4 h-4" />
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteStudent(student)}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </button>
+                            <button
+                              onClick={() => resetUserBuilderHistory(student)}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              Reset AI
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })
                 )}
@@ -8718,11 +8814,9 @@ const filteredStudents = onlyStudents.filter((student: any) => {
             </table>
           </div>
         </div>
-		
 
-	  
-	  
-		{showStudentEditModal && editingStudent && (
+
+{showStudentEditModal && editingStudent && (
   <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
     <div className="bg-white rounded-2xl w-full max-w-2xl p-6 space-y-5">
       <div className="flex items-center justify-between">
@@ -8759,8 +8853,37 @@ const filteredStudents = onlyStudents.filter((student: any) => {
             <option value="user">user</option>
             <option value="admin">admin</option>
 			<option value="partner_admin">partner_admin</option>
+			<option value="partner_org_admin">partner_org_admin</option>
           </select>
         </div>
+
+        {(studentForm.role === "partner_admin" || studentForm.role === "partner_org_admin") && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Partner Name</label>
+            <input
+              type="text"
+              value={studentForm.partnerName || ""}
+              onChange={(e) => setStudentForm((prev) => ({ ...prev, partnerName: e.target.value }))}
+              placeholder="e.g. YMCA, Halifax Library"
+              className="w-full border rounded-lg px-3 py-2"
+            />
+          </div>
+        )}
+
+        {studentForm.role === "partner_org_admin" && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Contracted Seats</label>
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={studentForm.contractSeats || 0}
+              onChange={(e) => setStudentForm((prev) => ({ ...prev, contractSeats: parseInt(e.target.value) || 0 }))}
+              className="w-full border rounded-lg px-3 py-2"
+            />
+            <p className="text-xs text-gray-400 mt-1">Total seats contracted with this org. The org admin's dashboard will show this as their seat limit.</p>
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-medium mb-1">Account Status</label>
@@ -9553,10 +9676,11 @@ const providerModels = {
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
 				  <option value="partner_admin">Partner Admin</option>
+				  <option value="partner_org_admin">Partner Org Admin</option>
                 </select>
               </div>
 			  
-{createUserForm.role === 'partner_admin' && (
+{(createUserForm.role === 'partner_admin' || createUserForm.role === 'partner_org_admin') && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Partner Name <span className="text-red-500">*</span></label>
                   <input
@@ -9567,6 +9691,22 @@ const providerModels = {
                     className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <p className="text-xs text-gray-400 mt-1">This name links the admin to their partner data.</p>
+                </div>
+              )}
+
+{createUserForm.role === 'partner_org_admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Contracted Seats <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={createUserForm.contractSeats || 0}
+                    onChange={(e) => setCreateUserForm(prev => ({ ...prev, contractSeats: parseInt(e.target.value) || 0 }))}
+                    placeholder="e.g. 150"
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Total seats contracted with this organization. The org admin will see this in their dashboard and allocate seats to groups.</p>
                 </div>
               )}
 			  

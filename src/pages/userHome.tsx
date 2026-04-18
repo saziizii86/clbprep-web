@@ -54,7 +54,7 @@ import S_T8_MockTest from "../pages/Mock/S_T8_MockTest";
 import S_Results_MockTest from "../pages/Mock/S_Results_MockTest";
 
 import { clearMockAnswersFromDB } from "../services/mockTestAnswersService";
-
+import { setTrackerUserId } from "./games/sessionTracker";
 
 import ReadingTest from "../pages/Reading/ReadingTest";
 import FeedbackPage from "./feedback";
@@ -81,6 +81,7 @@ import { getDashboardStats, getUserResultsParsed } from '../services/userResults
 import AISkillBuilders from "./AISkillBuilders";
 import { Brain } from "lucide-react"; // Brain icon for sidebar
 import AISkillGames from "./games/AISkillGames";
+import ProgressDashboard from "./ProgressDashboard";
 import { Gamepad2 } from "lucide-react";
 
 export default function CelpipPracticeDashboard() {
@@ -364,6 +365,7 @@ useEffect(() => {
 
       const userDoc: any = res.documents[0];
       setUserRowId(userDoc.$id);
+	  setTrackerUserId(userDoc.$id);   // ← ADD THIS
 
       if (["blocked", "suspended"].includes((userDoc.accountStatus || "active").toLowerCase())) {
         await account.deleteSession("current");
@@ -1925,6 +1927,7 @@ const handleSaveSettings = () => {
     { id: 'mock-exams', label: 'Mock Exams', icon: FileText },
     { id: 'skill-builders', label: 'AI Skill Builders', icon: Brain },
 	{ id: 'skill-games', label: 'AI Skill Games', icon: Gamepad2 },
+	{ id: 'progress', label: 'My Progress', icon: TrendingUp },
   ].map(item => (
     <button
       key={item.id}
@@ -4820,6 +4823,14 @@ onClick={() => {
   />
   ) : activeTab === "skill-games" ? (
   <AISkillGames
+    onBack={() => {
+      setActiveTab("dashboard");
+      setCurrentView("dashboard");
+    }}
+  />
+) : activeTab === "progress" ? (
+  <ProgressDashboard
+    userId={userRowId ?? undefined}
     onBack={() => {
       setActiveTab("dashboard");
       setCurrentView("dashboard");

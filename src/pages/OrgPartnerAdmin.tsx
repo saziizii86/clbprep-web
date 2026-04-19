@@ -278,6 +278,19 @@ function safeParseContractFormData(contract: any): Record<string, any> {
   return {};
 }
 
+function getStoredContractSnapshotHtml(contract: any): string {
+  const formData = safeParseContractFormData(contract);
+  const html = formData?.pdfSnapshotHtml || formData?.contractSnapshotHtml || formData?.frozenContractHtml || "";
+  return typeof html === "string" ? html.trim() : "";
+}
+
+function serializeContractFormData(originalContract: any, nextFormData: Record<string, any>): string {
+  if (typeof originalContract?.formData === "string") {
+    return JSON.stringify(nextFormData);
+  }
+  return JSON.stringify(nextFormData);
+}
+
 function getContractDurationDays(formData: Record<string, any>): number {
   const customDays = Number(formData?.customDays ?? formData?.serviceDays);
   if (Number.isFinite(customDays) && customDays >= 1) return Math.round(customDays);
@@ -2412,10 +2425,67 @@ export default function OrgPartnerAdmin() {
 
   // Map of contract $id → rendered HTML div (for per-contract PDF view)
   const contractPdfRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const snapshotSavingRef = useRef<Set<string>>(new Set());
+
+  const persistFrozenContractSnapshot = useCallback(async (contractDoc: any, html: string) => {
+    const contractId = String(contractDoc?.$id || "").trim();
+    if (!contractId || !html.trim()) return;
+    if (snapshotSavingRef.current.has(contractId)) return;
+
+    const parsed = safeParseContractFormData(contractDoc);
+    if (getStoredContractSnapshotHtml(contractDoc)) return;
+
+    snapshotSavingRef.current.add(contractId);
+    try {
+      const nextFormData = {
+        ...parsed,
+        pdfSnapshotHtml: html,
+        pdfSnapshotAt: new Date().toISOString(),
+        pdfSnapshotVersion: 1,
+      };
+
+      await databases.updateDocument(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, contractId, {
+        formData: serializeContractFormData(contractDoc, nextFormData),
+      });
+
+      setAllContracts((prev) => prev.map((item: any) => item?.$id === contractId
+        ? { ...item, formData: JSON.stringify(nextFormData) }
+        : item));
+      setContract((prev: any) => prev?.$id === contractId
+        ? { ...prev, formData: JSON.stringify(nextFormData) }
+        : prev);
+    } catch (e) {
+      console.warn("Failed to freeze contract snapshot:", e);
+    } finally {
+      snapshotSavingRef.current.delete(contractId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!allContracts.length) return;
+
+    const timer = window.setTimeout(() => {
+      allContracts.forEach((item: any) => {
+        if (!item?.$id) return;
+        if (!["paid", "expired", "suspended"].includes(String(item.status || ""))) return;
+        if (getStoredContractSnapshotHtml(item)) return;
+
+        const el = contractPdfRefs.current.get(item.$id);
+        const html = el?.innerHTML?.trim() || "";
+        if (!html) return;
+
+        void persistFrozenContractSnapshot(item, html);
+      });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [allContracts, persistFrozenContractSnapshot]);
 
   const openAnyContractPdf = useCallback((c: OrgContract, autoPrint = false) => {
+    const storedHtml = getStoredContractSnapshotHtml(c);
     const el = contractPdfRefs.current.get((c as any).$id);
-    const html = el?.innerHTML;
+    const liveHtml = el?.innerHTML?.trim() || "";
+    const html = storedHtml || liveHtml;
     if (!html) { window.alert("Contract preview is not ready yet."); return; }
     const fullHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
       <title>CLBPrep Contract</title>
@@ -2430,7 +2500,8 @@ export default function OrgPartnerAdmin() {
   }, []);
 
   const openContractPdfWindow = useCallback((autoPrint = false) => {
-    const html = contractPdfRef.current?.innerHTML;
+    const storedHtml = contract ? getStoredContractSnapshotHtml(contract) : "";
+    const html = storedHtml || contractPdfRef.current?.innerHTML?.trim() || "";
     if (!html) {
       window.alert("Contract preview is not ready yet.");
       return;
@@ -2486,7 +2557,7 @@ export default function OrgPartnerAdmin() {
     }
 
     cleanup();
-  }, []);
+  }, [contract]);
 
   const startStripeCheckout = useCallback(async (currentContract: OrgContract) => {
     try {
@@ -2561,10 +2632,10 @@ export default function OrgPartnerAdmin() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+            <button type="button" onClick={() => openAnyContractPdf(currentContract, false)} style={btnOutline}>
               <FolderOpen size={14} /> {options?.previewLabel || "View PDF"}
             </button>
-            <button type="button" onClick={() => openContractPdfWindow(true)} style={btnPrimary}>
+            <button type="button" onClick={() => openAnyContractPdf(currentContract, true)} style={btnPrimary}>
               <Download size={14} /> Download / Print PDF
             </button>
           </div>
@@ -2586,7 +2657,7 @@ export default function OrgPartnerAdmin() {
         </div>
       </div>
     );
-  }, [btnOutline, btnPrimary, openContractPdfWindow]);
+  }, [btnOutline, btnPrimary, openAnyContractPdf]);
 
   const openPage = (next: Page) => {
     setPage(next);
@@ -3889,10 +3960,10 @@ export default function OrgPartnerAdmin() {
                   </div>
                   {/* PDF actions */}
                   <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
-                    <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+                    <button type="button" onClick={() => openAnyContractPdf(contract, false)} style={btnOutline}>
                       <FolderOpen size={14} /> View PDF
                     </button>
-                    <button type="button" onClick={() => openContractPdfWindow(true)} style={btnPrimary}>
+                    <button type="button" onClick={() => openAnyContractPdf(contract, true)} style={btnPrimary}>
                       <Download size={14} /> Download / Print PDF
                     </button>
                   </div>
@@ -4106,7 +4177,7 @@ export default function OrgPartnerAdmin() {
                           />
                         </div>
                       </div>
-                      <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+                      <button type="button" onClick={() => openAnyContractPdf(contract, false)} style={btnOutline}>
                         <FolderOpen size={14} /> View Expired Contract
                       </button>
                     </div>

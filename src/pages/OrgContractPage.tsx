@@ -1,647 +1,359 @@
-import React, { useEffect, useState } from "react";
-import {
-  AlertCircle, ArrowLeft, CheckCircle, FileCheck,
-  Loader2, PauseCircle, PlayCircle, RotateCcw, Trash2, X,
-} from "lucide-react";
-import ContractTemplate from "./ContractTemplate";
-import {
-  getAllContracts,
-  approveContract,
-  cancelContract,
-  suspendContract,
-  reactivateContract,
-  deleteContract,
-  parseContractFormData,
-  contractStatusLabel,
-  contractStatusColor,
-} from "../services/contractsService";
-import type { OrgContract } from "../services/contractsService";
-import type { OrgContractRequestData } from "../services/contractsService";
+import React, { useMemo } from 'react';
 
-const CLBPREP_NAME              = "Soheila Azizi";
-const CLBPREP_COMPANY           = "Azizi Online Learning Services";
-const CONTRACT_EMAIL_FUNCTION_ID = "69ae201700398cefccd9";
+type ContractStatus =
+  | 'active'
+  | 'scheduled'
+  | 'pending_payment'
+  | 'expired'
+  | 'draft'
+  | 'cancelled';
 
-function cn(...classes: Array<string | undefined | false | null>) {
-  return classes.filter(Boolean).join(" ");
+export interface ContractRecord {
+  id: string;
+  seats: number;
+  amountCad: number;
+  title?: string;
+  termLabel?: string;
+  submittedAt?: string;
+  approvedBy?: string;
+  signedBy?: string;
+  contractStartDate?: string;
+  effectiveDate?: string;
+  expiresAt?: string;
+  carryoverDays?: number;
+  pdfUrl?: string;
+  downloadUrl?: string;
+  status: ContractStatus;
 }
 
-function formatDateOnly(value?: string) {
-  if (!value) return "—";
-  const trimmed = String(value).trim();
-  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  const t = new Date(trimmed).getTime();
-  if (!Number.isFinite(t)) return "—";
-  return new Date(t).toLocaleDateString("en-CA", { timeZone: "UTC" });
+interface OrgPartnerContractPageProps {
+  organizationName: string;
+  contracts: ContractRecord[];
+  onRefresh?: () => void;
+  onRequestNewContract?: () => void;
+  onViewContract?: (contract: ContractRecord) => void;
+  onDownloadContract?: (contract: ContractRecord) => void;
 }
 
-function localDateOnly() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function formatDate(value?: string): string {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
 }
 
-function Button({
-  children, className, variant = "default", type, ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "secondary" | "danger" | "warning" | "success";
-}) {
-  const base = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50 h-10 px-4";
-  const variants = {
-    default:   "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm hover:shadow-lg hover:brightness-[1.03]",
-    secondary: "bg-white text-slate-900 ring-1 ring-slate-200 hover:bg-slate-50",
-    danger:    "bg-red-600 text-white hover:bg-red-700",
-    warning:   "bg-orange-500 text-white hover:bg-orange-600",
-    success:   "bg-green-600 text-white hover:bg-green-700",
+function daysRemaining(endDate?: string): number | null {
+  if (!endDate) return null;
+
+  const today = new Date();
+  const end = new Date(endDate);
+
+  if (Number.isNaN(end.getTime())) return null;
+
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const endStart = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  const diffMs = endStart.getTime() - todayStart.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+function currency(amountCad: number): string {
+  return new Intl.NumberFormat('en-CA', {
+    style: 'currency',
+    currency: 'CAD',
+    maximumFractionDigits: 0,
+  }).format(amountCad);
+}
+
+function sortContracts(contracts: ContractRecord[]): ContractRecord[] {
+  const priority: Record<ContractStatus, number> = {
+    active: 0,
+    pending_payment: 1,
+    scheduled: 2,
+    draft: 3,
+    expired: 4,
+    cancelled: 5,
   };
+
+  return [...contracts].sort((a, b) => {
+    const aPriority = priority[a.status] ?? 99;
+    const bPriority = priority[b.status] ?? 99;
+
+    if (aPriority !== bPriority) return aPriority - bPriority;
+
+    const aDate = new Date(a.effectiveDate || a.contractStartDate || a.submittedAt || 0).getTime();
+    const bDate = new Date(b.effectiveDate || b.contractStartDate || b.submittedAt || 0).getTime();
+
+    return bDate - aDate;
+  });
+}
+
+function getBadgeStyle(status: ContractStatus): string {
+  switch (status) {
+    case 'active':
+      return 'bg-green-100 text-green-700 border border-green-200';
+    case 'scheduled':
+      return 'bg-blue-100 text-blue-700 border border-blue-200';
+    case 'pending_payment':
+      return 'bg-amber-100 text-amber-700 border border-amber-200';
+    case 'expired':
+      return 'bg-slate-100 text-slate-600 border border-slate-200';
+    case 'cancelled':
+      return 'bg-rose-100 text-rose-700 border border-rose-200';
+    default:
+      return 'bg-violet-100 text-violet-700 border border-violet-200';
+  }
+}
+
+function getBadgeText(status: ContractStatus): string {
+  switch (status) {
+    case 'pending_payment':
+      return 'Payment Required';
+    case 'expired':
+      return 'Frozen';
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ');
+  }
+}
+
+function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <button type={type ?? "button"} className={cn(base, variants[variant], className)} {...props}>
+    <div className="flex flex-col gap-1 rounded-xl bg-slate-50 px-4 py-3 sm:min-w-[180px]">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-sm font-medium text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+function ActionButton({
+  children,
+  onClick,
+  variant = 'secondary',
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: 'primary' | 'secondary';
+}) {
+  const base =
+    'inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2';
+
+  const styles =
+    variant === 'primary'
+      ? 'bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-500'
+      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400';
+
+  return (
+    <button type="button" onClick={onClick} className={`${base} ${styles}`}>
       {children}
     </button>
   );
 }
 
-function ConfirmModal({
-  title, message, confirmLabel, confirmVariant = "danger", onConfirm, onCancel,
-}: {
-  title: string; message: string; confirmLabel: string;
-  confirmVariant?: "danger" | "warning";
-  onConfirm: () => void; onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-        <h3 className="text-base font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-500 mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-          <Button variant={confirmVariant} onClick={onConfirm}>{confirmLabel}</Button>
-        </div>
-      </div>
-    </div>
+export default function OrgPartnerContractPage({
+  organizationName,
+  contracts,
+  onRefresh,
+  onRequestNewContract,
+  onViewContract,
+  onDownloadContract,
+}: OrgPartnerContractPageProps) {
+  const orderedContracts = useMemo(() => sortContracts(contracts), [contracts]);
+
+  const currentContract = useMemo(
+    () => orderedContracts.find((contract) => contract.status === 'active') ?? null,
+    [orderedContracts],
   );
-}
 
-export default function OrgContractPage({ onBack }: { onBack: () => void }) {
-  const [contracts, setContracts]     = useState<OrgContract[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [selected, setSelected]       = useState<OrgContract | null>(null);
-  const [adminAgreed, setAdminAgreed] = useState(false);
-  const [approvalPreviewDate, setApprovalPreviewDate] = useState("");
-  const [approving, setApproving]     = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [approveErr, setApproveErr]   = useState("");
+  const scheduledContract = useMemo(
+    () => orderedContracts.find((contract) => contract.status === 'scheduled') ?? null,
+    [orderedContracts],
+  );
 
-  // Confirm modal state
-  const [confirm, setConfirm] = useState<{
-    title: string; message: string; confirmLabel: string;
-    confirmVariant?: "danger" | "warning";
-    onConfirm: () => void;
-  } | null>(null);
+  const pendingPaymentContract = useMemo(
+    () => orderedContracts.find((contract) => contract.status === 'pending_payment') ?? null,
+    [orderedContracts],
+  );
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const docs = await getAllContracts();
-      setContracts(docs);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const checkoutSuccess = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('checkout') === 'success';
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  const currentDaysRemaining = daysRemaining(currentContract?.expiresAt);
 
-  const sendEmail = async (to: string, name: string, subject: string, body: string) => {
-    try {
-      const { functions } = await import("../appwrite");
-      await functions.createExecution(
-        CONTRACT_EMAIL_FUNCTION_ID,
-        JSON.stringify({ to, name, email: "support@clbprep.com", feedbackType: subject, message: body, attachments: "None" }),
-        false
-      );
-    } catch (e) { console.warn("Email failed:", e); }
-  };
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Organization Contract</h1>
+            <p className="mt-1 text-sm text-slate-600">Manage contracts for {organizationName}.</p>
+          </div>
 
-  const handleApprove = async () => {
-    if (!selected || !adminAgreed) return;
-    setApproving(true);
-    setApproveErr("");
-    try {
-      const approvedAt = approvalPreviewDate || localDateOnly();
+          <div className="flex items-center gap-3">
+            <ActionButton onClick={onRequestNewContract} variant="primary">
+              Request New Contract
+            </ActionButton>
+            <ActionButton onClick={onRefresh}>Refresh</ActionButton>
+          </div>
+        </div>
 
-      await approveContract(
-        selected.$id,
-        CLBPREP_NAME,
-        "Owner",
-        approvedAt
-      );
-
-      const fd = parseContractFormData(selected);
-      await sendEmail(
-        fd.primaryAdminEmail || "",
-        fd.primaryAdminName || selected.orgName,
-        `CLBPrep Contract Approved — ${selected.orgName}`,
-        [
-          `Hello ${fd.primaryAdminName || selected.orgName},`,
-          ``,
-          `Your CLBPrep contract has been approved! Please log into your partner panel, go to the Contract section, and click "Proceed to Payment" to activate your ${fd.selectedPlan} seats.`,
-          ``,
-          `Best regards,\n${CLBPREP_NAME}\nsupport@clbprep.com`,
-        ].join("\n")
-      );
-      await load();
-      setSelected(null);
-      setAdminAgreed(false);
-      setApprovalPreviewDate("");
-    } catch (e: any) {
-      setApproveErr(e?.message || "Failed to approve.");
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  const doCancel = async (contract: OrgContract) => {
-    setActionLoading(true);
-    try {
-      await cancelContract(contract.$id);
-      const fd = parseContractFormData(contract);
-      await sendEmail(
-        fd.primaryAdminEmail || "",
-        fd.primaryAdminName || contract.orgName,
-        `CLBPrep Contract Cancelled — ${contract.orgName}`,
-        `Hello ${fd.primaryAdminName || contract.orgName},\n\nYour CLBPrep contract has been cancelled.\n\nIf you believe this is an error, please contact support@clbprep.com.\n\nBest regards,\n${CLBPREP_NAME}`
-      );
-      await load();
-      if (selected?.$id === contract.$id) { setSelected(null); setAdminAgreed(false); setApprovalPreviewDate(""); }
-    } finally {
-      setActionLoading(false);
-      setConfirm(null);
-    }
-  };
-
-  const doSuspend = async (contract: OrgContract) => {
-    setActionLoading(true);
-    try {
-      await suspendContract(contract.$id);
-      const fd = parseContractFormData(contract);
-      await sendEmail(
-        fd.primaryAdminEmail || "",
-        fd.primaryAdminName || contract.orgName,
-        `CLBPrep Contract Suspended — ${contract.orgName}`,
-        `Hello ${fd.primaryAdminName || contract.orgName},\n\nYour CLBPrep contract has been temporarily suspended.\n\nPlease contact support@clbprep.com to resolve any outstanding issues.\n\nBest regards,\n${CLBPREP_NAME}`
-      );
-      await load();
-      if (selected?.$id === contract.$id) setSelected(prev => prev ? { ...prev, status: "suspended" } : null);
-    } finally {
-      setActionLoading(false);
-      setConfirm(null);
-    }
-  };
-
-  const doReactivate = async (contract: OrgContract) => {
-    setActionLoading(true);
-    try {
-      await reactivateContract(contract.$id);
-      const fd = parseContractFormData(contract);
-      await sendEmail(
-        fd.primaryAdminEmail || "",
-        fd.primaryAdminName || contract.orgName,
-        `CLBPrep Contract Reactivated — ${contract.orgName}`,
-        `Hello ${fd.primaryAdminName || contract.orgName},\n\nYour CLBPrep contract has been reactivated. Please log into your partner panel and proceed to payment to re-enable your seats.\n\nBest regards,\n${CLBPREP_NAME}`
-      );
-      await load();
-      if (selected?.$id === contract.$id) setSelected(prev => prev ? { ...prev, status: "pending_payment" } : null);
-    } finally {
-      setActionLoading(false);
-      setConfirm(null);
-    }
-  };
-
-  const doDelete = async (contract: OrgContract) => {
-    setActionLoading(true);
-    try {
-      await deleteContract(contract.$id);
-      await load();
-      if (selected?.$id === contract.$id) { setSelected(null); setAdminAgreed(false); setApprovalPreviewDate(""); }
-    } finally {
-      setActionLoading(false);
-      setConfirm(null);
-    }
-  };
-
-  const pendingCount = contracts.filter(c => c.status === "pending_admin").length;
-
-  // Context-aware action buttons for a given contract
-  const ActionButtons = ({ contract, size = "normal" }: { contract: OrgContract; size?: "normal" | "small" }) => {
-    const s = size === "small";
-    const cls = s ? "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition" : "";
-
-    return (
-      <div className={cn("flex flex-wrap items-center gap-2", s ? "gap-1.5" : "gap-2")} onClick={e => e.stopPropagation()}>
-        {/* Pending admin: Decline */}
-        {contract.status === "pending_admin" && (
-          <button className={cn(cls, s ? "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100" : "")}
-            onClick={() => setConfirm({
-              title: "Decline Contract",
-              message: `Decline and cancel this contract request from ${contract.orgName}? They will be notified by email.`,
-              confirmLabel: "Decline", confirmVariant: "danger",
-              onConfirm: () => doCancel(contract),
-            })}
-          >
-            {!s && <X className="h-3.5 w-3.5" />} Decline
-          </button>
+        {checkoutSuccess && (
+          <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-4 text-sm text-green-800">
+            <span className="font-semibold">Payment successful.</span>{' '}
+            Your payment was received and your contract status has been updated.
+          </div>
         )}
 
-        {/* Pending payment or paid: Suspend */}
-        {(contract.status === "pending_payment" || contract.status === "paid") && (
-          <button className={cn(cls, s ? "bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100" : "")}
-            onClick={() => setConfirm({
-              title: "Suspend Contract",
-              message: `Temporarily suspend ${contract.orgName}'s contract? Their access will be paused. You can reactivate it later.`,
-              confirmLabel: "Suspend", confirmVariant: "warning",
-              onConfirm: () => doSuspend(contract),
-            })}
-          >
-            {!s && <PauseCircle className="h-3.5 w-3.5" />} Suspend
-          </button>
-        )}
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          {currentContract ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="mb-3 inline-flex items-center rounded-full border border-green-200 bg-green-50 px-3 py-1 text-sm font-semibold text-green-700">
+                    Contract Active
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {currentContract.title || `${currentContract.seats} seats — ${currency(currentContract.amountCad)}`}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-600">
+                    This top card is status-only. PDF actions are available below in the contract list.
+                  </p>
+                </div>
 
-        {/* Suspended: Reactivate */}
-        {contract.status === "suspended" && (
-          <button className={cn(cls, s ? "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100" : "")}
-            onClick={() => setConfirm({
-              title: "Reactivate Contract",
-              message: `Reactivate ${contract.orgName}'s contract? They will be notified to proceed with payment.`,
-              confirmLabel: "Reactivate", confirmVariant: "warning",
-              onConfirm: () => doReactivate(contract),
-            })}
-          >
-            {!s && <PlayCircle className="h-3.5 w-3.5" />} Reactivate
-          </button>
-        )}
-
-        {/* All non-paid, non-cancelled: Cancel */}
-        {contract.status !== "paid" && contract.status !== "cancelled" && contract.status !== "pending_admin" && (
-          <button className={cn(cls, s ? "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100" : "")}
-            onClick={() => setConfirm({
-              title: "Cancel Contract",
-              message: `Cancel ${contract.orgName}'s contract? This will end the agreement. They will be notified.`,
-              confirmLabel: "Cancel Contract", confirmVariant: "danger",
-              onConfirm: () => doCancel(contract),
-            })}
-          >
-            {!s && <X className="h-3.5 w-3.5" />} Cancel
-          </button>
-        )}
-
-        {/* Cancelled: Delete */}
-        {contract.status === "cancelled" && (
-          <button className={cn(cls, s ? "bg-slate-100 text-slate-600 border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200" : "")}
-            onClick={() => setConfirm({
-              title: "Delete Contract",
-              message: `Permanently delete this contract record for ${contract.orgName}? This cannot be undone.`,
-              confirmLabel: "Delete Permanently", confirmVariant: "danger",
-              onConfirm: () => doDelete(contract),
-            })}
-          >
-            {!s && <Trash2 className="h-3.5 w-3.5" />} Delete
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  /* ── Detail view ── */
-  if (selected) {
-    const fd = parseContractFormData(selected) as Partial<OrgContractRequestData>;
-    const current = contracts.find(c => c.$id === selected.$id) || selected;
-    const isApprovable = current.status === "pending_admin";
-
-    const templateData = {
-      organizationName: fd.organizationName || selected.orgName,
-      organizationAddress: fd.organizationAddress || "",
-      billingContactName: fd.billingContactName || "",
-      billingEmail: fd.billingEmail || "",
-      invoiceEmail: fd.invoiceEmail || "",
-      primaryAdminName: fd.primaryAdminName || "",
-      primaryAdminEmail: fd.primaryAdminEmail || "",
-      selectedPlan: fd.selectedPlan || "25",
-      selectedPlanPrice: fd.selectedPlanPrice || 179,
-      startDate: fd.startDate || "",
-      effectiveDate: fd.effectiveDate || "",
-      initialTerm: fd.initialTerm || "Monthly",
-      autoRenew: fd.autoRenew || false,
-      billingMethod: fd.billingMethod || "",
-      clbprepSignerName: CLBPREP_NAME,
-      clbprepSignerTitle: "Owner",
-      specialNotes: fd.specialNotes || "",
-    };
-
-    return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="sticky top-0 z-50 border-b bg-white/90 backdrop-blur">
-          <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
-            <div className="flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white">
-                <FileCheck className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-sm font-bold">{selected.orgName}</div>
-                <div className="text-xs text-slate-400 flex items-center gap-2">
-                  Submitted {new Date(selected.createdAt).toLocaleDateString("en-CA")}
-                  <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold", contractStatusColor[current.status])}>
-                    {contractStatusLabel[current.status]}
-                  </span>
+                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-center md:min-w-[180px]">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Days remaining</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-900">
+                    {currentDaysRemaining !== null ? currentDaysRemaining : '—'}
+                  </div>
                 </div>
               </div>
-            </div>
-            <Button variant="secondary" onClick={() => { setSelected(null); setAdminAgreed(false); setApprovalPreviewDate(""); setApproveErr(""); }}>
-              <ArrowLeft className="h-4 w-4" /> Back to list
-            </Button>
-          </div>
-        </header>
 
-        <main className="mx-auto max-w-3xl px-4 py-6 space-y-4">
-          {/* Suspended banner */}
-          {current.status === "suspended" && (
-            <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3 text-sm text-orange-800 font-medium">
-              <PauseCircle className="w-5 h-5 shrink-0" />
-              This contract is suspended. Reactivate it to restore payment access.
-              <button className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-700"
-                onClick={() => setConfirm({
-                  title: "Reactivate Contract",
-                  message: `Reactivate ${selected.orgName}'s contract?`,
-                  confirmLabel: "Reactivate", confirmVariant: "warning",
-                  onConfirm: () => doReactivate(selected),
-                })}
-              >
-                <PlayCircle className="h-3.5 w-3.5" /> Reactivate
-              </button>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <SummaryRow label="Approved by" value={currentContract.approvedBy || '—'} />
+                <SummaryRow label="Signed by" value={currentContract.signedBy || '—'} />
+                <SummaryRow label="Contract start" value={formatDate(currentContract.contractStartDate)} />
+                <SummaryRow label="Effective date" value={formatDate(currentContract.effectiveDate)} />
+                <SummaryRow label="Expiry date" value={formatDate(currentContract.expiresAt)} />
+                <SummaryRow label="Carryover days" value={currentContract.carryoverDays ?? 0} />
+                <SummaryRow label="Seats" value={currentContract.seats} />
+                <SummaryRow label="Amount" value={currency(currentContract.amountCad)} />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+              <h2 className="text-lg font-bold text-slate-900">No active contract</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                You do not have an active contract right now. You can request a new contract below.
+              </p>
             </div>
           )}
+        </section>
 
-          {/* Quick info */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              ["Organization", fd.organizationName || selected.orgName],
-              ["Plan", `${fd.selectedPlan} seats — CAD $${fd.selectedPlanPrice}/mo`],
-              ["Term", `${fd.months} month${(fd.months||1) > 1 ? "s" : ""} · ${fd.initialTerm}`],
-              ["Start", fd.startDate || "—"],
-            ].map(([label, val]) => (
-              <div key={label} className="bg-white rounded-xl border border-slate-200 px-4 py-3">
-                <div className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1">{label}</div>
-                <div className="text-sm font-bold text-slate-800">{val}</div>
+        {pendingPaymentContract && (
+          <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-emerald-900">New contract approved — payment required</h3>
+                <p className="mt-1 text-sm text-emerald-800">
+                  Your new contract has been approved. Complete payment to activate the new seats.
+                </p>
               </div>
-            ))}
-          </div>
-
-          {/* Org signature */}
-          <div className="bg-white rounded-xl border border-slate-200 px-5 py-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Signed by Org</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div><div className="text-xs text-slate-400 mb-0.5">Name</div><div className="font-semibold">{selected.orgSignerName}</div></div>
-              <div><div className="text-xs text-slate-400 mb-0.5">Title</div><div className="font-semibold">{selected.orgSignerTitle}</div></div>
-              <div><div className="text-xs text-slate-400 mb-0.5">Signature</div><div className="font-semibold italic font-serif">{selected.orgSignature}</div></div>
-              <div><div className="text-xs text-slate-400 mb-0.5">Signed</div><div className="font-semibold">{formatDateOnly(selected.orgSignedAt)}</div></div>
-            </div>
-          </div>
-
-          {/* Full contract */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-800">Full Service Agreement</div>
-              <div className="text-xs text-slate-400 mt-0.5">Submitted by {selected.orgName} · {new Date(selected.createdAt).toLocaleDateString("en-CA")}</div>
-            </div>
-            <div className="p-6 max-h-[560px] overflow-y-auto border-b border-slate-100">
-              <ContractTemplate
-                data={templateData}
-                orgSignerName={selected.orgSignerName}
-                orgSignerTitle={selected.orgSignerTitle}
-                orgSignature={selected.orgSignature}
-                orgSignedAt={selected.orgSignedAt}
-                adminSignerName={current.adminSignerName || CLBPREP_NAME}
-                adminSignerTitle={current.adminSignerTitle || "Owner"}
-                adminApprovedAt={current.adminApprovedAt || approvalPreviewDate}
-                mode="signed"
-              />
-            </div>
-
-            {/* Approve section */}
-            {isApprovable && (
-              <div className="p-5 space-y-4">
-                <label className={cn(
-                  "flex items-start gap-3 rounded-2xl border-2 p-4 cursor-pointer transition-all",
-                  adminAgreed ? "border-green-400 bg-green-50" : "border-slate-200 bg-white hover:border-slate-300"
-                )}>
-                  <input
-                    type="checkbox"
-                    checked={adminAgreed}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setAdminAgreed(checked);
-                      setApprovalPreviewDate(checked ? localDateOnly() : "");
-                    }}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
-                  />
-                  <div>
-                    <div className="text-sm font-semibold text-slate-800">
-                      I, {CLBPREP_NAME} of {CLBPREP_COMPANY}, have reviewed this contract and approve its terms.
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      Approving notifies the org and sets status to "Awaiting Payment".
-                    </div>
-                    {adminAgreed && approvalPreviewDate && (
-                      <div className="mt-3 inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
-                        Approval date: {formatDateOnly(approvalPreviewDate)}
-                      </div>
-                    )}
-                  </div>
-                </label>
-
-                {approveErr && (
-                  <div className="flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm font-medium">
-                    <AlertCircle className="w-4 h-4 shrink-0" /> {approveErr}
-                  </div>
-                )}
-
-                <div className="flex justify-between">
-                  <Button variant="danger"
-                    onClick={() => setConfirm({
-                      title: "Decline Contract",
-                      message: `Decline this contract request from ${selected.orgName}? They will be notified.`,
-                      confirmLabel: "Decline", confirmVariant: "danger",
-                      onConfirm: () => doCancel(selected),
-                    })}
-                  >
-                    <X className="h-4 w-4" /> Decline
-                  </Button>
-                  <Button onClick={handleApprove} disabled={!adminAgreed || approving}>
-                    {approving
-                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Approving…</>
-                      : <><CheckCircle className="h-4 w-4" /> Approve & Notify Org</>
-                    }
-                  </Button>
-                </div>
+              <div className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm">
+                {pendingPaymentContract.seats} seats — {currency(pendingPaymentContract.amountCad)}
               </div>
-            )}
-
-            {/* Status-based action bar for non-pending contracts */}
-            {!isApprovable && (
-              <div className="p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm text-slate-500">
-                    {current.status === "pending_payment" && `Approved by ${selected.adminSignerName || CLBPREP_NAME} · waiting for payment`}
-                    {current.status === "paid" && "Contract active · payment confirmed"}
-                    {current.status === "suspended" && "Contract is suspended"}
-                    {current.status === "cancelled" && "Contract was cancelled"}
-                  </div>
-                  <ActionButtons contract={current} />
-                </div>
-              </div>
-            )}
-          </div>
-        </main>
-
-        {confirm && (
-          <ConfirmModal
-            title={confirm.title}
-            message={confirm.message}
-            confirmLabel={confirm.confirmLabel}
-            confirmVariant={confirm.confirmVariant}
-            onConfirm={confirm.onConfirm}
-            onCancel={() => setConfirm(null)}
-          />
+            </div>
+          </section>
         )}
-      </div>
-    );
-  }
 
-  /* ── List view ── */
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-50 border-b bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white">
-              <FileCheck className="h-4 w-4" />
-            </div>
+        {scheduledContract && (
+          <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
+            <h3 className="text-lg font-bold text-blue-900">Next contract scheduled</h3>
+            <p className="mt-1 text-sm text-blue-800">
+              Your current contract stays active until {formatDate(currentContract?.expiresAt)}. The next contract becomes
+              effective on {formatDate(scheduledContract.effectiveDate)} and runs until {formatDate(scheduledContract.expiresAt)}.
+            </p>
+          </section>
+        )}
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-sm font-bold">Contracts</div>
-              <div className="text-xs text-slate-400">
-                {pendingCount > 0 ? `${pendingCount} pending approval` : "All caught up"}
-              </div>
+              <h3 className="text-xl font-bold text-slate-900">Need more seats or a new term?</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                You can always request a new contract. Previous contracts stay frozen and read-only.
+              </p>
+              {scheduledContract && (
+                <p className="mt-2 text-sm text-amber-700">
+                  Note: you already have a scheduled contract. If you request another one, your admin team can review and
+                  decide whether to replace the scheduled contract or create a later term.
+                </p>
+              )}
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={load}>
-              <RotateCcw className={cn("h-4 w-4", loading && "animate-spin")} /> Refresh
-            </Button>
-            <Button variant="secondary" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4" /> Back
-            </Button>
-          </div>
-        </div>
-      </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-6 space-y-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Contract Requests</h2>
-          <p className="text-sm text-slate-500 mt-1">Review, approve, suspend, or cancel org partner contracts.</p>
-        </div>
-
-        {loading && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">Loading contracts…</p>
+            <ActionButton onClick={onRequestNewContract} variant="primary">
+              Request New Contract
+            </ActionButton>
           </div>
-        )}
+        </section>
 
-        {!loading && contracts.length === 0 && (
-          <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-16 text-center">
-            <FileCheck className="h-10 w-10 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-500 font-medium">No contract requests yet</p>
-            <p className="text-slate-400 text-sm mt-1">When an org submits a contract request it will appear here.</p>
+        <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-6 py-5">
+            <h3 className="text-xl font-bold text-slate-900">All Contracts</h3>
+            <p className="mt-1 text-sm text-slate-600">Previous contracts are frozen. View and download actions are available here only.</p>
           </div>
-        )}
 
-        {!loading && contracts.length > 0 && (
-          <div className="grid gap-3">
-            {contracts.map(contract => {
-              const fd = parseContractFormData(contract);
-              return (
-                <div key={contract.$id}
-                  className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-5 gap-4">
-                    {/* Org info — clickable to open detail */}
-                    <div className="flex items-start gap-4 cursor-pointer flex-1 min-w-0"
-                      onClick={() => { setSelected(contract); setAdminAgreed(false); setApproveErr(""); }}
-                    >
-                      <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
-                        {(contract.orgName || "?")[0].toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-semibold text-slate-900">{contract.orgName}</div>
-                        <div className="text-sm text-slate-500 mt-0.5">
-                          {fd.selectedPlan} seats · CAD ${fd.selectedPlanPrice}/mo · {fd.months} month{(fd.months||1) > 1 ? "s" : ""}
-                        </div>
-                        <div className="flex items-center gap-2 mt-2 flex-wrap">
-                          <span className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold", contractStatusColor[contract.status])}>
-                            {contractStatusLabel[contract.status]}
+          <div className="divide-y divide-slate-200">
+            {orderedContracts.length === 0 ? (
+              <div className="px-6 py-10 text-center text-sm text-slate-500">No contracts found.</div>
+            ) : (
+              orderedContracts.map((contract) => {
+                const frozen = contract.status === 'expired' || contract.status === 'cancelled';
+                const rowMuted = frozen ? 'bg-slate-50 opacity-80' : 'bg-white';
+
+                return (
+                  <div key={contract.id} className={`px-6 py-5 ${rowMuted}`}>
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h4 className="text-base font-bold text-slate-900">
+                            {contract.title || `${contract.seats} seats — ${currency(contract.amountCad)}`}
+                          </h4>
+                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getBadgeStyle(contract.status)}`}>
+                            {getBadgeText(contract.status)}
                           </span>
-                          <span className="text-xs text-slate-400">{new Date(contract.createdAt).toLocaleDateString("en-CA")}</span>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
+                          <span>Seats: {contract.seats}</span>
+                          <span>Submitted: {formatDate(contract.submittedAt)}</span>
+                          <span>Start: {formatDate(contract.contractStartDate)}</span>
+                          <span>Effective: {formatDate(contract.effectiveDate)}</span>
+                          <span>Expires: {formatDate(contract.expiresAt)}</span>
+                          <span>Carryover: {contract.carryoverDays ?? 0} days</span>
+                          {contract.termLabel && <span>Term: {contract.termLabel}</span>}
                         </div>
                       </div>
-                    </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      {/* Open / Review button */}
-                      {contract.status === "pending_admin" && (
-                        <button
-                          onClick={() => { setSelected(contract); setAdminAgreed(false); setApproveErr(""); }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100"
-                        >
-                          Review →
-                        </button>
-                      )}
-                      {contract.status === "paid" && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-green-50 text-green-700 text-xs font-bold border border-green-200">
-                          <CheckCircle className="h-3.5 w-3.5" /> Active
-                        </span>
-                      )}
-                      {contract.status === "pending_payment" && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
-                          <CheckCircle className="h-3.5 w-3.5" /> Approved
-                        </span>
-                      )}
-                      {contract.status === "suspended" && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-orange-50 text-orange-700 text-xs font-bold border border-orange-200">
-                          <PauseCircle className="h-3.5 w-3.5" /> Suspended
-                        </span>
-                      )}
-
-                      {/* Inline quick actions */}
-                      <ActionButtons contract={contract} size="small" />
+                      <div className="flex flex-wrap items-center gap-3">
+                        <ActionButton onClick={() => onViewContract?.(contract)}>View</ActionButton>
+                        <ActionButton onClick={() => onDownloadContract?.(contract)}>Download</ActionButton>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
-        )}
-      </main>
-
-      {confirm && (
-        <ConfirmModal
-          title={confirm.title}
-          message={confirm.message}
-          confirmLabel={confirm.confirmLabel}
-          confirmVariant={confirm.confirmVariant}
-          onConfirm={confirm.onConfirm}
-          onCancel={() => setConfirm(null)}
-        />
-      )}
+        </section>
+      </div>
     </div>
   );
 }

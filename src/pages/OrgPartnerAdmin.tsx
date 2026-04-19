@@ -1576,11 +1576,27 @@ export default function OrgPartnerAdmin() {
         expired:         4,
         cancelled:       5,
       };
-      const res = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
+      let docs: any[] = [];
+
+      // Try by orgId first
+      const byOrgId = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
         Query.equal("orgId", orgUserId),
         Query.orderDesc("$createdAt"),
         Query.limit(50),
       ]);
+      docs = byOrgId.documents;
+
+      // Fallback: query by partnerName if orgId returned nothing
+      if (!docs.length && partnerName) {
+        const byPartner = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
+          Query.equal("orgName", partnerName),
+          Query.orderDesc("$createdAt"),
+          Query.limit(50),
+        ]);
+        docs = byPartner.documents;
+      }
+
+      const res = { documents: docs };
       if (!res.documents.length) {
         setContract(null);
         return;
@@ -3085,20 +3101,41 @@ export default function OrgPartnerAdmin() {
 
                 {/* ── Pending renewal notice (shown when a new contract is under review) ── */}
                 {pendingRenewal && (
-                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 16, padding: "16px 20px", display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0, marginTop: 2 }} />
-                    <div>
-                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#92400e", marginBottom: 3 }}>
-                        New contract request in progress
-                      </div>
-                      <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.6 }}>
-                        Your renewal request is currently&nbsp;
-                        <strong>
-                          {pendingRenewal.status === "pending_admin" && "under review by CLBPrep"}
-                          {pendingRenewal.status === "pending_org"   && "awaiting your signature"}
-                          {pendingRenewal.status === "pending_payment" && "awaiting payment"}
-                        </strong>.
-                        Your current contract remains active until it expires or the new one is paid.
+                  <div style={{ background: pendingRenewal.status === "pending_payment" ? "#f0fdf4" : "#fffbeb", border: `1px solid ${pendingRenewal.status === "pending_payment" ? "#86efac" : "#fde68a"}`, borderRadius: 16, padding: "20px 24px" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      {pendingRenewal.status === "pending_payment"
+                        ? <CheckCircle size={16} style={{ color: "#16a34a", flexShrink: 0, marginTop: 2 }} />
+                        : <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0, marginTop: 2 }} />
+                      }
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: pendingRenewal.status === "pending_payment" ? "#14532d" : "#92400e", marginBottom: 3 }}>
+                          {pendingRenewal.status === "pending_payment"
+                            ? "🎉 New contract approved — payment required"
+                            : "New contract request in progress"
+                          }
+                        </div>
+                        <div style={{ fontSize: 12, color: pendingRenewal.status === "pending_payment" ? "#15803d" : "#92400e", lineHeight: 1.6 }}>
+                          {pendingRenewal.status === "pending_payment" && (
+                            <>CLBPrep has approved your new contract. Complete payment to activate your new seats.<br />Your current contract remains active until the new one is paid.</>
+                          )}
+                          {pendingRenewal.status === "pending_admin" && (
+                            <>Your renewal request is under review by CLBPrep. Your current contract remains active in the meantime.</>
+                          )}
+                          {pendingRenewal.status === "pending_org" && (
+                            <>Your renewal contract is awaiting your signature. Your current contract remains active in the meantime.</>
+                          )}
+                        </div>
+                        {pendingRenewal.status === "pending_payment" && (
+                          <div style={{ marginTop: 14 }}>
+                            <button
+                              type="button"
+                              onClick={() => startStripeCheckout(pendingRenewal)}
+                              style={{ ...btnPrimary, background: "linear-gradient(135deg,#16a34a,#15803d)", padding: "10px 24px", fontSize: 13 }}
+                            >
+                              Proceed to Payment →
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -1640,13 +1640,30 @@ export default function OrgPartnerAdmin() {
         setContract(null);
         return;
       }
+
+      const todayMs = new Date().setUTCHours(0, 0, 0, 0);
+
       const sorted = [...res.documents].sort((a: any, b: any) => {
         const pa = STATUS_PRIORITY[a.status] ?? 99;
         const pb = STATUS_PRIORITY[b.status] ?? 99;
         if (pa !== pb) return pa - pb;
+        // Among paid contracts: prefer the one valid for today
+        if (a.status === "paid" && b.status === "paid") {
+          const afd = (() => { try { return typeof a.formData === "string" ? JSON.parse(a.formData) : (a.formData || {}); } catch { return {}; } })();
+          const bfd = (() => { try { return typeof b.formData === "string" ? JSON.parse(b.formData) : (b.formData || {}); } catch { return {}; } })();
+          const aExpiry = (() => { const s = afd.effectiveDate || afd.startDate; if (!s) return 0; const d = new Date(s); d.setUTCMonth(d.getUTCMonth() + (Number(afd.months) || 1)); return d.getTime(); })();
+          const bExpiry = (() => { const s = bfd.effectiveDate || bfd.startDate; if (!s) return 0; const d = new Date(s); d.setUTCMonth(d.getUTCMonth() + (Number(bfd.months) || 1)); return d.getTime(); })();
+          const aValid = aExpiry > todayMs;
+          const bValid = bExpiry > todayMs;
+          if (aValid && !bValid) return -1;
+          if (!aValid && bValid) return 1;
+          // Both valid → latest expiry first
+          return bExpiry - aExpiry;
+        }
         // Same priority → newest first
         return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
       });
+
       setContract(sorted[0] as unknown as OrgContract);
       setAllContracts(sorted as unknown as OrgContract[]);
 
@@ -1688,6 +1705,25 @@ export default function OrgPartnerAdmin() {
     if (contract.status !== "pending_payment") {
     }
   }, [contract?.$id, contract?.status, contract]);
+
+  // Map of contract $id → rendered HTML div (for per-contract PDF view)
+  const contractPdfRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const openAnyContractPdf = useCallback((c: OrgContract, autoPrint = false) => {
+    const el = contractPdfRefs.current.get((c as any).$id);
+    const html = el?.innerHTML;
+    if (!html) { window.alert("Contract preview is not ready yet."); return; }
+    const fullHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+      <title>CLBPrep Contract</title>
+      <style>html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,Helvetica,sans-serif;padding:32px;color:#132238}*{box-sizing:border-box}@page{size:auto;margin:18mm}@media print{html,body{background:#fff}body{padding:0}}</style>
+      </head><body>${html}</body></html>`;
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank", "width=1100,height=900");
+    if (!win) { URL.revokeObjectURL(url); window.alert("Please allow pop-ups."); return; }
+    if (autoPrint) { win.onload = () => { win.focus(); win.print(); setTimeout(() => URL.revokeObjectURL(url), 60000); }; }
+    else { setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  }, []);
 
   const openContractPdfWindow = useCallback((autoPrint = false) => {
     const html = contractPdfRef.current?.innerHTML;
@@ -3241,23 +3277,51 @@ export default function OrgPartnerAdmin() {
                         };
                         const sc = statusColors[c.status] || { bg: "#f3f4f6", text: "#6b7280", label: c.status };
                         return (
-                          <div key={c.$id} style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isActive ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: S.text }}>{cfd?.selectedPlan} seats — CAD ${cfd?.totalPrice}</span>
-                                {isActive && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
-                              </div>
-                              <div style={{ fontSize: 11, color: S.textSoft }}>
-                                {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Submitted: {formatContractDate(c.$createdAt)}
+                          <div key={c.$id}>
+                            {/* Hidden template render so openAnyContractPdf can read its HTML */}
+                            <div style={{ display: "none" }}>
+                              <div ref={el => { if (el) contractPdfRefs.current.set(c.$id, el); }}>
+                                <ContractTemplate
+                                  data={{ ...parseContractFormData(c), clbprepSignerName: c.adminSignerName || "Soheila Azizi", clbprepSignerTitle: c.adminSignerTitle || "Owner" } as any}
+                                  mode="signed"
+                                  orgSignerName={c.orgSignerName}
+                                  orgSignerTitle={c.orgSignerTitle}
+                                  orgSignature={c.orgSignature}
+                                  orgSignedAt={c.orgSignedAt}
+                                  adminSignerName={c.adminSignerName || "Soheila Azizi"}
+                                  adminSignerTitle={c.adminSignerTitle || "Owner"}
+                                  adminApprovedAt={c.adminApprovedAt}
+                                />
                               </div>
                             </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "3px 10px", borderRadius: 999 }}>{sc.label}</span>
-                              {c.status === "pending_payment" && (
-                                <button type="button" onClick={() => startStripeCheckout(c)} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>
-                                  Pay Now →
-                                </button>
-                              )}
+                            <div style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isActive ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: S.text }}>{cfd?.selectedPlan} seats — CAD ${cfd?.totalPrice}</span>
+                                  {isActive && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
+                                </div>
+                                <div style={{ fontSize: 11, color: S.textSoft }}>
+                                  {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Submitted: {formatContractDate(c.$createdAt)}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "3px 10px", borderRadius: 999 }}>{sc.label}</span>
+                                {(c.status === "paid" || c.status === "expired") && (
+                                  <>
+                                    <button type="button" onClick={() => openAnyContractPdf(c, false)} style={{ ...btnOutline, padding: "4px 12px", fontSize: 11 }}>
+                                      <FolderOpen size={12} /> View
+                                    </button>
+                                    <button type="button" onClick={() => openAnyContractPdf(c, true)} style={{ ...btnOutline, padding: "4px 12px", fontSize: 11 }}>
+                                      <Download size={12} /> Download
+                                    </button>
+                                  </>
+                                )}
+                                {c.status === "pending_payment" && (
+                                  <button type="button" onClick={() => startStripeCheckout(c)} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>
+                                    Pay Now →
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );

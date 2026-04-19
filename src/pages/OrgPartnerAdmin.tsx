@@ -1052,6 +1052,7 @@ export default function OrgPartnerAdmin() {
   const [contractSeats, setContractSeats] = useState(0);
   const [orgUserId, setOrgUserId] = useState("");
   const [contract,        setContract]        = useState<OrgContract | null>(null);
+  const [pendingRenewal,  setPendingRenewal]  = useState<OrgContract | null>(null);
   const [contractLoading, setContractLoading] = useState(false);
   const [showContractRequestFlow, setShowContractRequestFlow] = useState(false);
   const contractPdfRef = useRef<HTMLDivElement>(null);
@@ -1592,6 +1593,17 @@ export default function OrgPartnerAdmin() {
         return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
       });
       setContract(sorted[0] as unknown as OrgContract);
+
+      // If the top contract is paid, check if there's also a pending renewal
+      const top = sorted[0] as any;
+      if (top.status === "paid") {
+        const renewal = sorted.find((c: any) =>
+          ["pending_admin", "pending_org", "pending_payment"].includes(c.status)
+        );
+        setPendingRenewal(renewal ? renewal as unknown as OrgContract : null);
+      } else {
+        setPendingRenewal(null);
+      }
     } catch (e) {
       console.error("Failed to load contract:", e);
       // Fallback to contractsService if direct query fails
@@ -3069,6 +3081,29 @@ export default function OrgPartnerAdmin() {
                   </div>
                 </div>
 
+                </div>
+
+                {/* ── Pending renewal notice (shown when a new contract is under review) ── */}
+                {pendingRenewal && (
+                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 16, padding: "16px 20px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#92400e", marginBottom: 3 }}>
+                        New contract request in progress
+                      </div>
+                      <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.6 }}>
+                        Your renewal request is currently&nbsp;
+                        <strong>
+                          {pendingRenewal.status === "pending_admin" && "under review by CLBPrep"}
+                          {pendingRenewal.status === "pending_org"   && "awaiting your signature"}
+                          {pendingRenewal.status === "pending_payment" && "awaiting payment"}
+                        </strong>.
+                        Your current contract remains active until it expires or the new one is paid.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── New contract / more seats ── */}
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
                   <div>
@@ -3077,13 +3112,15 @@ export default function OrgPartnerAdmin() {
                       Request a new quote and sign a new contract to adjust your plan.
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowContractRequestFlow((prev) => !prev)}
-                    style={showContractRequestFlow ? btnOutline : btnPrimary}
-                  >
-                    {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
-                  </button>
+                  {!pendingRenewal && (
+                    <button
+                      type="button"
+                      onClick={() => setShowContractRequestFlow((prev) => !prev)}
+                      style={showContractRequestFlow ? btnOutline : btnPrimary}
+                    >
+                      {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
+                    </button>
+                  )}
                 </div>
 
                 {showContractRequestFlow && (

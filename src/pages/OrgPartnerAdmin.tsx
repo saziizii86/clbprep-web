@@ -2993,7 +2993,22 @@ export default function OrgPartnerAdmin() {
 
             if (contract && contract.status === "paid") return (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* ── Active status card ── */}
+                {/* Hidden contract template kept in DOM so contractPdfRef is populated */}
+                <div style={{ display: "none" }}>
+                  <div ref={contractPdfRef}>
+                    <ContractTemplate
+                      data={{ ...parseContractFormData(contract), clbprepSignerName: contract.adminSignerName || "Soheila Azizi", clbprepSignerTitle: contract.adminSignerTitle || "Owner" } as any}
+                      mode="signed"
+                      orgSignerName={contract.orgSignerName}
+                      orgSignerTitle={contract.orgSignerTitle}
+                      orgSignature={contract.orgSignature}
+                      orgSignedAt={contract.orgSignedAt}
+                      adminSignerName={contract.adminSignerName || "Soheila Azizi"}
+                      adminSignerTitle={contract.adminSignerTitle || "Owner"}
+                      adminApprovedAt={contract.adminApprovedAt}
+                    />
+                  </div>
+                </div>
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
                   <CheckCircle size={36} style={{ color: S.green, margin: "0 auto 12px" }} />
                   <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Active</div>

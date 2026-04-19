@@ -1196,8 +1196,10 @@ export default function OrgPartnerAdmin() {
     setLearners(onlyLearners as unknown as Learner[]);
   }, [partnerName, eligible]);
 
+  const loadContractRef = useRef<() => Promise<void>>(async () => {});
+
   useEffect(() => {
-    if (!partnerName || !orgUserId) return; // wait until auth is confirmed
+    if (!partnerName || !orgUserId) return;
     const checkout = searchParams.get("checkout");
     if (!checkout) return;
 
@@ -1208,8 +1210,6 @@ export default function OrgPartnerAdmin() {
       const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
 
       (async () => {
-        // Ask the Appwrite function to verify the Stripe session and mark
-        // the contract as paid — this works even if the webhook hasn't fired yet.
         if (sessionId && STRIPE_FUNCTION_ID) {
           try {
             await functions.createExecution(
@@ -1223,11 +1223,10 @@ export default function OrgPartnerAdmin() {
             console.error("verify-org-payment failed:", e);
           }
         }
-        // Reload the contract so the UI shows the paid/active state.
-        await loadContract();
+        await loadContractRef.current();
       })();
     }
-  }, [partnerName, orgUserId, searchParams, loadContract]);
+  }, [partnerName, orgUserId, searchParams]);
 
   useEffect(() => {
     if (!partnerName) return;
@@ -1572,6 +1571,9 @@ export default function OrgPartnerAdmin() {
       setContractLoading(false);
     }
   }, [orgUserId]);
+
+  // Keep ref in sync so the checkout useEffect (defined earlier) can call it safely
+  useEffect(() => { loadContractRef.current = loadContract; }, [loadContract]);
 
   useEffect(() => {
     if (orgUserId) loadContract();

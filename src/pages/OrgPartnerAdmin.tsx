@@ -3352,38 +3352,52 @@ export default function OrgPartnerAdmin() {
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 18 }}>
                 {groupCards.map(({ group, members, activeThisWeek, lessActive, totalSessions, pct }) => (
-                  <button
-                    key={group.$id}
-                    onClick={() => setSelectedGroup(group)}
-                    className="opa-hover-card"
-                    style={{ ...shellCard, padding: 20, textAlign: "left", cursor: "pointer", fontFamily: "inherit", position: "relative", overflow: "hidden" }}
-                  >
-                    <div style={{ position: "absolute", insetInline: 0, top: 0, height: 4, background: group.color }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                      <div style={{ width: 46, height: 46, borderRadius: 14, background: `${group.color}18`, color: group.color, display: "grid", placeItems: "center", fontSize: 22 }}>{group.emoji}</div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontFamily: titleFont, fontSize: 22, fontWeight: 900, color: group.color }}>{members.length}/{group.seats}</div>
-                        <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700 }}>seats used</div>
-                        <div style={{ fontSize: 11, color: group.color, fontWeight: 800, marginTop: 2 }}>{pct}% full</div>
-                      </div>
-                    </div>
-                    <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800 }}>{group.name}</div>
-                    <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.55, marginTop: 6 }}>{group.desc || "No description"}</div>
-                    <div style={{ fontSize: 12, color: group.color, fontWeight: 800, marginTop: 8 }}>{group.schedule}</div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 16 }}>
-                      {[
-                        { label: "Active", value: activeThisWeek, color: S.green },
-                        { label: "Less active", value: lessActive, color: lessActive ? S.red : S.green },
-                        { label: "Sessions", value: totalSessions, color: S.blue },
-                      ].map((item) => (
-                        <div key={item.label} style={{ background: "#f8fbff", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-                          <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 900, color: item.color }}>{item.value}</div>
-                          <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700, marginTop: 2 }}>{item.label}</div>
+                  <div key={group.$id} style={{ position: "relative" }}>
+                    <button
+                      onClick={() => setSelectedGroup(group)}
+                      className="opa-hover-card"
+                      style={{ ...shellCard, padding: 20, textAlign: "left", cursor: "pointer", fontFamily: "inherit", position: "relative", overflow: "hidden", width: "100%" }}
+                    >
+                      <div style={{ position: "absolute", insetInline: 0, top: 0, height: 4, background: group.color }} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: 14, background: `${group.color}18`, color: group.color, display: "grid", placeItems: "center", fontSize: 22 }}>{group.emoji}</div>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontFamily: titleFont, fontSize: 22, fontWeight: 900, color: group.color }}>{members.length}/{group.seats}</div>
+                            <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700 }}>seats used</div>
+                            <div style={{ fontSize: 11, color: group.color, fontWeight: 800, marginTop: 2 }}>{pct}% full</div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGroupToDelete(group);
+                            }}
+                            style={{ width: 30, height: 30, borderRadius: 9, border: "none", background: "#fee2e2", color: S.red, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 2 }}
+                            title="Delete group"
+                            aria-label={`Delete ${group.name}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  </button>
+                      </div>
+                      <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800 }}>{group.name}</div>
+                      <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.55, marginTop: 6 }}>{group.desc || "No description"}</div>
+                      <div style={{ fontSize: 12, color: group.color, fontWeight: 800, marginTop: 8 }}>{group.schedule}</div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 16 }}>
+                        {[
+                          { label: "Active", value: activeThisWeek, color: S.green },
+                          { label: "Less active", value: lessActive, color: lessActive ? S.red : S.green },
+                          { label: "Sessions", value: totalSessions, color: S.blue },
+                        ].map((item) => (
+                          <div key={item.label} style={{ background: "#f8fbff", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+                            <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 900, color: item.color }}>{item.value}</div>
+                            <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700, marginTop: 2 }}>{item.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </button>
+                  </div>
                 ))}
 
                 <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} className="opa-hover-card" style={{ ...shellCard, border: `1.5px dashed ${S.border}`, padding: 20, minHeight: 244, display: "grid", placeItems: "center", textAlign: "center", cursor: "pointer", fontFamily: "inherit" }}>

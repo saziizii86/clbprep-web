@@ -3015,7 +3015,16 @@ export default function OrgPartnerAdmin() {
                   <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
                     Your contract is active and your {fd?.selectedPlan} seats are enabled.<br />
                     Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
-                    Signed by <strong>{contract.orgSignerName}</strong> on {contract.orgSignedAt ? new Date(contract.orgSignedAt).toLocaleDateString("en-CA") : "—"}
+                    Signed by <strong>{contract.orgSignerName}</strong> on {formatContractDate(contract.orgSignedAt)}<br />
+                    {(() => {
+                      const start = fd?.effectiveDate || fd?.startDate;
+                      const months = Number(fd?.months) || 1;
+                      if (!start) return null;
+                      const d = new Date(start);
+                      d.setUTCMonth(d.getUTCMonth() + months);
+                      const expiry = d.toLocaleDateString("en-CA", { timeZone: "UTC" });
+                      return <>Expires <strong>{expiry}</strong> ({months} month{months > 1 ? "s" : ""})</>;
+                    })()}
                   </div>
                   {/* PDF actions */}
                   <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>

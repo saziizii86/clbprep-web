@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ID, Query } from "appwrite";
 import {
   account,
@@ -1042,6 +1042,7 @@ function ContractRequestFlow({
 
 export default function OrgPartnerAdmin() {
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [adminName, setAdminName] = useState("");
@@ -1194,6 +1195,14 @@ export default function OrgPartnerAdmin() {
 
     setLearners(onlyLearners as unknown as Learner[]);
   }, [partnerName, eligible]);
+
+  useEffect(() => {
+    if (!partnerName) return; // wait until auth is confirmed
+    const checkout = searchParams.get("checkout");
+    if (checkout === "cancelled" || checkout === "success") {
+      setPage("contract");
+    }
+  }, [partnerName, searchParams]);
 
   useEffect(() => {
     if (!partnerName) return;

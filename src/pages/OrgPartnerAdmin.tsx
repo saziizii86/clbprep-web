@@ -221,6 +221,102 @@ function formatContractDate(value?: string): string {
   return new Date(t).toLocaleDateString("en-CA", { timeZone: "UTC" });
 }
 
+
+const MS_PER_DAY = 86400000;
+
+function parseDateOnlyUTC(value?: string | Date | null): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return null;
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  }
+  const parsed = new Date(trimmed);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function diffUtcDays(start: Date, end: Date): number {
+  const startDate = parseDateOnlyUTC(start);
+  const endDate = parseDateOnlyUTC(end);
+  if (!startDate || !endDate) return 0;
+  return Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / MS_PER_DAY));
+}
+
+function getCustomDaysDiscount(days: number): number {
+  if (days >= 360) return 12;
+  if (days >= 180) return 8;
+  if (days >= 90) return 5;
+  return 0;
+}
+
+function safeParseContractFormData(contract: any): Record<string, any> {
+  try {
+    const parsed = parseContractFormData(contract);
+    if (parsed && typeof parsed === "object") return parsed as Record<string, any>;
+  } catch {}
+  try {
+    if (typeof contract?.formData === "string") {
+      const parsed = JSON.parse(contract.formData);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, any>;
+    }
+    if (contract?.formData && typeof contract.formData === "object") {
+      return contract.formData as Record<string, any>;
+    }
+  } catch {}
+  return {};
+}
+
+function getContractDurationDays(formData: Record<string, any>): number {
+  const customDays = Number(formData?.customDays ?? formData?.serviceDays);
+  if (Number.isFinite(customDays) && customDays >= 1) return Math.round(customDays);
+
+  const initialTerm = String(formData?.initialTerm || "").toLowerCase();
+  const daysMatch = initialTerm.match(/(\d+)\s*day/);
+  if (daysMatch) return Math.max(1, Number(daysMatch[1]) || 30);
+
+  const monthsMatch = initialTerm.match(/(\d+)\s*month/);
+  if (monthsMatch) return Math.max(1, Number(monthsMatch[1]) || 1) * 30;
+
+  const months = Number(formData?.months);
+  if (Number.isFinite(months) && months >= 1) return Math.round(months * 30);
+
+  return 30;
+}
+
+function getContractTiming(contract: any) {
+  const formData = safeParseContractFormData(contract);
+  const start = parseDateOnlyUTC(formData?.effectiveDate || formData?.startDate);
+  const baseDurationDays = getContractDurationDays(formData);
+  const carryoverDaysRaw = Number(formData?.carryoverDays ?? formData?.rolloverDays ?? 0);
+  const carryoverDays = Number.isFinite(carryoverDaysRaw) && carryoverDaysRaw > 0
+    ? Math.round(carryoverDaysRaw)
+    : 0;
+  const totalDurationDays = baseDurationDays + carryoverDays;
+  const end = start ? addUtcDays(start, totalDurationDays) : null;
+
+  return {
+    formData,
+    start,
+    end,
+    baseDurationDays,
+    carryoverDays,
+    totalDurationDays,
+  };
+}
+
+
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const safeNumber = (value: unknown, fallback = 0) => {
@@ -614,73 +710,216 @@ function calcMonthlyPrice(seats: number): number {
   return Math.round(pricePerSeat(seats) * seats);
 }
 
+
 function ContractRequestFlow({
-  partnerName, orgUserId, adminName, onSubmitted,
-  S, titleFont, inputStyle, btnPrimary, btnOutline,
+  partnerName,
+  orgUserId,
+  adminName,
+  activeContract,
+  onSubmitted,
+  S,
+  titleFont,
+  inputStyle,
+  btnPrimary,
+  btnOutline,
 }: {
-  partnerName: string; orgUserId: string; adminName: string;
+  partnerName: string;
+  orgUserId: string;
+  adminName: string;
+  activeContract: OrgContract | null;
   onSubmitted: () => void;
-  S: any; titleFont: string; inputStyle: any; btnPrimary: any; btnOutline: any;
+  S: any;
+  titleFont: string;
+  inputStyle: any;
+  btnPrimary: any;
+  btnOutline: any;
 }) {
+  const MIN_SEATS = 15;
+  const MIN_CUSTOM_DAYS = 30;
   const [step, setStep] = React.useState<"quote" | "register">("quote");
 
-  // Quote state
-  const [plan,           setPlan]           = React.useState("20");
-  const [customSeats,    setCustomSeats]    = React.useState<number | "">(20);
-  const [months,         setMonths]         = React.useState(1);
-  const [customDaysMode, setCustomDaysMode] = React.useState(false);
-  const [customDays,     setCustomDays]     = React.useState<number | "">(30);
-  const [seatsErr,       setSeatsErr]       = React.useState("");
+  const [customSeats, setCustomSeats] = React.useState<number | "">(20);
+  const [months, setMonths] = React.useState(1);
+  const [durationMode, setDurationMode] = React.useState<"preset" | "custom">("preset");
+  const [customDays, setCustomDays] = React.useState<number | "">(30);
+  const [seatsErr, setSeatsErr] = React.useState("");
+  const [durationErr, setDurationErr] = React.useState("");
 
-  // Effective seat count — custom input overrides preset buttons
-  const effectiveSeats = typeof customSeats === "number" && customSeats >= 15 ? customSeats : 25;
-  // Snap plan key for downstream use
-  const planKey = String(effectiveSeats);
-
-  // Register state
-  const [orgName,      setOrgName]      = React.useState(partnerName || "");
-  const [orgAddress,   setOrgAddress]   = React.useState("");
-  const [billingName,  setBillingName]  = React.useState(adminName || "");
+  const [orgName, setOrgName] = React.useState(partnerName || "");
+  const [orgAddress, setOrgAddress] = React.useState("");
+  const [billingName, setBillingName] = React.useState(adminName || "");
   const [billingEmail, setBillingEmail] = React.useState("");
   const [invoiceEmail, setInvoiceEmail] = React.useState("");
-  const [adminEmail,   setAdminEmail]   = React.useState("");
-  const [startDate,    setStartDate]    = React.useState("");
-  const [effectiveDate,setEffectiveDate]= React.useState("");
-  const [term,         setTerm]         = React.useState("Monthly");
-  const [autoRenew,    setAutoRenew]    = React.useState(false);
-  const [billing,      setBilling]      = React.useState("Stripe invoice");
-  const [notes,        setNotes]        = React.useState("");
-  const [agreed,       setAgreed]       = React.useState(false);
-  const [signerName,   setSignerName]   = React.useState(adminName || "");
-  const [signerTitle,  setSignerTitle]  = React.useState("");
-  const [signature,    setSignature]    = React.useState("");
-  const [signedDate,   setSignedDate]   = React.useState("");
-  const [submitting,   setSubmitting]   = React.useState(false);
-  const [submitErr,    setSubmitErr]    = React.useState("");
+  const [adminEmail, setAdminEmail] = React.useState("");
+  const [startDate, setStartDate] = React.useState("");
+  const [effectiveDate, setEffectiveDate] = React.useState("");
+  const [autoRenew, setAutoRenew] = React.useState(false);
+  const [billing, setBilling] = React.useState("Stripe invoice");
+  const [notes, setNotes] = React.useState("");
+  const [agreed, setAgreed] = React.useState(false);
+  const [signerName, setSignerName] = React.useState(adminName || "");
+  const [signerTitle, setSignerTitle] = React.useState("");
+  const [signature, setSignature] = React.useState("");
+  const [signedDate, setSignedDate] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitErr, setSubmitErr] = React.useState("");
 
-  const disc        = customDaysMode ? 0 : (DISCOUNT[months] || 0);
+  const activeTiming = React.useMemo(
+    () => (activeContract && activeContract.status === "paid" ? getContractTiming(activeContract) : null),
+    [activeContract]
+  );
+
+  const effectiveSeats =
+    typeof customSeats === "number" && customSeats >= MIN_SEATS ? customSeats : 20;
+  const selectedDurationDays =
+    durationMode === "custom"
+      ? (typeof customDays === "number" && customDays >= MIN_CUSTOM_DAYS ? customDays : MIN_CUSTOM_DAYS)
+      : months * 30;
+  const selectedDiscount =
+    durationMode === "custom" ? getCustomDaysDiscount(selectedDurationDays) : (DISCOUNT[months] || 0);
   const baseMonthly = calcMonthlyPrice(effectiveSeats);
-  const discounted  = Math.round(baseMonthly * (1 - disc / 100));
-  const effectiveDays = customDaysMode ? (typeof customDays === "number" && customDays >= 1 ? customDays : 30) : months * 30;
-  const dailyRate   = discounted / 30;
-  const total       = customDaysMode
-    ? Math.round(dailyRate * effectiveDays)
-    : discounted * months;
+  const monthlyAfterDiscount = Math.round(baseMonthly * (1 - selectedDiscount / 100));
+  const total = Math.round((monthlyAfterDiscount * selectedDurationDays) / 30);
+  const selectedDurationLabel =
+    durationMode === "custom"
+      ? `${selectedDurationDays} days`
+      : months === 1
+        ? "1 month"
+        : `${months} months`;
+
+  const startDateForValidation = React.useMemo(
+    () => parseDateOnlyUTC(startDate || effectiveDate),
+    [startDate, effectiveDate]
+  );
+
+  const recommendedRenewalStart = React.useMemo(() => {
+    if (!activeTiming?.end) return null;
+    return addUtcDays(activeTiming.end, -3);
+  }, [activeTiming]);
+
+  const overlapDays = React.useMemo(() => {
+    if (!activeTiming?.end || !startDateForValidation) return 0;
+    if (startDateForValidation.getTime() >= activeTiming.end.getTime()) return 0;
+    return diffUtcDays(startDateForValidation, activeTiming.end);
+  }, [activeTiming, startDateForValidation]);
+
+  const carryoverDays = overlapDays > 0 && overlapDays <= 3 ? overlapDays : 0;
+
+  const projectedEndDate = React.useMemo(() => {
+    if (!startDateForValidation) return null;
+    return addUtcDays(startDateForValidation, selectedDurationDays + carryoverDays);
+  }, [startDateForValidation, selectedDurationDays, carryoverDays]);
+
+  const renewalNotice = React.useMemo(() => {
+    if (!activeTiming?.end) return null;
+    const expiryLabel = formatContractDate(activeTiming.end.toISOString());
+    const suggestedStartLabel = recommendedRenewalStart
+      ? formatContractDate(recommendedRenewalStart.toISOString())
+      : expiryLabel;
+
+    if (!startDateForValidation) {
+      return {
+        tone: "info" as const,
+        title: "Current contract on file",
+        body:
+          `Your current contract expires on ${expiryLabel}. ` +
+          `For a smooth renewal, it is best to start the new contract between ${suggestedStartLabel} and ${expiryLabel}. ` +
+          `If you start within the last 3 days, those remaining days will be added to the new expiry date.`,
+      };
+    }
+
+    if (overlapDays > 3) {
+      return {
+        tone: "warn" as const,
+        title: "This start date overlaps your current contract",
+        body:
+          `You already have an active contract that expires on ${expiryLabel}. ` +
+          `Only the last 3 remaining days can be carried forward. ` +
+          `To avoid unnecessary overlap, choose ${suggestedStartLabel} or later.`,
+      };
+    }
+
+    if (carryoverDays > 0) {
+      return {
+        tone: "success" as const,
+        title: `${carryoverDays} day${carryoverDays !== 1 ? "s" : ""} will be added to the new expiry date`,
+        body:
+          `Your current contract expires on ${expiryLabel}. ` +
+          `Because this new contract starts within the final 3 days, those ${carryoverDays} remaining day${carryoverDays !== 1 ? "s" : ""} ` +
+          `will be added. New projected expiry: ${projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : "—"}.`,
+      };
+    }
+
+    return {
+      tone: "neutral" as const,
+      title: "No overlap with the current contract",
+      body: `Your current contract expires on ${expiryLabel}.`,
+    };
+  }, [activeTiming, carryoverDays, overlapDays, projectedEndDate, recommendedRenewalStart, startDateForValidation]);
+
+  const handleContinueToRegister = () => {
+    let hasError = false;
+
+    if (typeof customSeats !== "number" || customSeats < MIN_SEATS) {
+      setSeatsErr(`Minimum ${MIN_SEATS} seats required`);
+      hasError = true;
+    } else {
+      setSeatsErr("");
+    }
+
+    if (durationMode === "custom" && (typeof customDays !== "number" || customDays < MIN_CUSTOM_DAYS)) {
+      setDurationErr(`Minimum ${MIN_CUSTOM_DAYS} days required`);
+      hasError = true;
+    } else {
+      setDurationErr("");
+    }
+
+    if (hasError) return;
+    setStep("register");
+  };
 
   const handleSubmit = async () => {
-    if (!agreed) { setSubmitErr("Please read and agree to the terms."); return; }
-    if (!signerName.trim() || !signerTitle.trim() || !signature.trim() || !signedDate) {
-      setSubmitErr("Please fill in all signature fields."); return;
+    if (durationMode === "custom" && (typeof customDays !== "number" || customDays < MIN_CUSTOM_DAYS)) {
+      setSubmitErr(`Custom duration must be at least ${MIN_CUSTOM_DAYS} days.`);
+      return;
     }
-    if (!startDate) { setSubmitErr("Please set a start date."); return; }
+    if (!agreed) {
+      setSubmitErr("Please read and agree to the terms.");
+      return;
+    }
+    if (!signerName.trim() || !signerTitle.trim() || !signature.trim() || !signedDate) {
+      setSubmitErr("Please fill in all signature fields.");
+      return;
+    }
+    if (!startDate) {
+      setSubmitErr("Please set a start date.");
+      return;
+    }
+
+    const startForSubmit = parseDateOnlyUTC(startDate || effectiveDate);
+    const carryoverForSubmit =
+      activeTiming?.end && startForSubmit && startForSubmit.getTime() < activeTiming.end.getTime()
+        ? Math.min(3, diffUtcDays(startForSubmit, activeTiming.end))
+        : 0;
+
     setSubmitting(true);
     setSubmitErr("");
     try {
-      const termMonths = customDaysMode ? Math.ceil(effectiveDays / 30) : months;
-      const termLabel  = customDaysMode ? `${effectiveDays} days` : (months === 1 ? "Monthly" : `${months} months`);
+      const termMonths = Math.max(1, Math.ceil(selectedDurationDays / 30));
+      const systemNoteParts = [
+        notes.trim(),
+        activeTiming?.end ? `Current contract expires on ${formatContractDate(activeTiming.end.toISOString())}.` : "",
+        carryoverForSubmit > 0
+          ? `${carryoverForSubmit} carryover day${carryoverForSubmit !== 1 ? "s" : ""} should be added because the new contract starts within the final 3 days of the current term.`
+          : "",
+        overlapDays > 3
+          ? `Selected start date overlaps the current contract by ${overlapDays} days.`
+          : "",
+      ].filter(Boolean);
+
       const formData: OrgContractRequestData = {
-        selectedPlan: planKey,
-        selectedPlanPrice: discounted,
+        selectedPlan: String(effectiveSeats),
+        selectedPlanPrice: monthlyAfterDiscount,
         months: termMonths,
         totalPrice: total,
         organizationName: orgName,
@@ -692,15 +931,35 @@ function ContractRequestFlow({
         primaryAdminEmail: adminEmail || billingEmail,
         startDate,
         effectiveDate: effectiveDate || startDate,
-        initialTerm: termLabel,
+        initialTerm: selectedDurationLabel,
         autoRenew,
         billingMethod: billing,
-        specialNotes: notes,
+        specialNotes: systemNoteParts.join("\n"),
         orgSignedAt: signedDate,
-        ...(customDaysMode ? { customDays: effectiveDays } : {}),
-      } as OrgContractRequestData & { orgSignedAt: string; customDays?: number };
-      await createContractRequest(orgUserId, orgName, formData, signerName, signerTitle, signature, signedDate);
-      // Notify owner by email without blocking the submit flow
+        customDays: durationMode === "custom" ? selectedDurationDays : undefined,
+        serviceDays: selectedDurationDays,
+        carryoverDays: carryoverForSubmit || undefined,
+        currentContractExpiresOn: activeTiming?.end ? formatContractDate(activeTiming.end.toISOString()) : undefined,
+        adjustedProjectedEndDate: projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : undefined,
+      } as OrgContractRequestData & {
+        orgSignedAt: string;
+        customDays?: number;
+        serviceDays?: number;
+        carryoverDays?: number;
+        currentContractExpiresOn?: string;
+        adjustedProjectedEndDate?: string;
+      };
+
+      await createContractRequest(
+        orgUserId,
+        orgName,
+        formData,
+        signerName,
+        signerTitle,
+        signature,
+        signedDate
+      );
+
       try {
         void functions.createExecution(
           "69ae201700398cefccd9",
@@ -716,16 +975,19 @@ function ContractRequestFlow({
               ``,
               `Details:`,
               `  Organization: ${orgName}`,
-              `  Plan: ${plan} seats — CAD $${discounted}/month`,
-              `  Duration: ${months} month${months > 1 ? "s" : ""}`,
+              `  Plan: ${effectiveSeats} seats — CAD $${monthlyAfterDiscount}/month`,
+              `  Duration: ${selectedDurationLabel}`,
               `  Total: CAD $${total}`,
               `  Start Date: ${startDate}`,
+              carryoverForSubmit > 0
+                ? `  Carryover Days: ${carryoverForSubmit} (new expiry extends automatically)`
+                : null,
               `  Signed by: ${signerName} (${signerTitle})`,
               ``,
               `Please log into your admin dashboard and review the contract under the Contracts tab.`,
               ``,
               `CLBPrep System`,
-            ].join("\n"),
+            ].filter(Boolean).join("\n"),
             attachments: "None",
           }),
           true
@@ -742,271 +1004,531 @@ function ContractRequestFlow({
     }
   };
 
-  /* ── Step 1: Quote ── */
-  if (step === "quote") return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ background: "linear-gradient(135deg,#1e3a5f,#12284b)", borderRadius: 16, padding: "16px 22px", color: "white", display: "flex", alignItems: "center", gap: 14 }}>
-        <FileCheck size={22} style={{ flexShrink: 0, opacity: 0.8 }} />
-        <div>
-          <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, marginBottom: 3 }}>Request a Quote</div>
-          <div style={{ fontSize: 11, opacity: .8, lineHeight: 1.6 }}>Select your seat plan and contract duration to see your pricing. If you're happy with the quote, you can proceed to register your contract.</div>
-        </div>
-      </div>
-
-      {/* Plan selector */}
-      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>1. Select Seats</div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Choose a common plan or enter any number (minimum 15)</div>
-        </div>
-        <div style={{ padding: "16px 20px" }}>
-          {/* Quick-select preset buttons */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
-            {QUOTE_PLANS.map(p => {
-              const active = effectiveSeats === Number(p.key);
-              return (
-                <button key={p.key}
-                  onClick={() => { setCustomSeats(Number(p.key)); setSeatsErr(""); }}
-                  style={{
-                    border: `2px solid ${active ? "#6366f1" : S.border}`,
-                    borderRadius: 12, padding: "10px 8px", background: active ? "#eef2ff" : "#fff",
-                    cursor: "pointer", textAlign: "center", transition: "all .15s",
-                  }}
-                >
-                  <div style={{ fontWeight: 800, fontSize: 14, color: active ? "#4338ca" : S.text }}>{p.key}</div>
-                  <div style={{ fontSize: 10, color: S.textSoft, marginTop: 1 }}>seats</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#4338ca" : S.text, marginTop: 4 }}>
-                    ${p.price}<span style={{ fontSize: 10, fontWeight: 400, color: S.textSoft }}>/mo</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Custom seat input */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#f8fafc", borderRadius: 12, border: `1px solid ${seatsErr ? "#fca5a5" : S.border}` }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: S.text, flexShrink: 0 }}>Custom seats:</div>
-            <input
-              type="number"
-              min={15}
-              max={10000}
-              value={customSeats}
-              onChange={e => {
-                const val = e.target.value === "" ? "" : parseInt(e.target.value);
-                setCustomSeats(val as number | "");
-                if (typeof val === "number" && val < 15) {
-                  setSeatsErr("Minimum 15 seats required");
-                } else {
-                  setSeatsErr("");
-                }
-              }}
-              placeholder="e.g. 75"
-              style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 800, fontSize: 16 }}
-            />
-            <div style={{ fontSize: 12, color: S.textSoft }}>
-              {typeof customSeats === "number" && customSeats >= 15
-                ? <span style={{ color: "#16a34a", fontWeight: 700 }}>
-                    ${pricePerSeat(customSeats).toFixed(2)}/seat · CAD ${calcMonthlyPrice(customSeats)}/month
-                  </span>
-                : <span style={{ color: S.textSoft }}>Enter a number ≥ 15</span>
-              }
-            </div>
-          </div>
-          {seatsErr && (
-            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6, paddingLeft: 4 }}>⚠ {seatsErr}</div>
-          )}
-
-          {/* Pricing tiers info */}
-          <div style={{ marginTop: 12, padding: "10px 14px", background: "#f1f5f9", borderRadius: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: S.textSoft, marginBottom: 6, letterSpacing: ".06em" }}>VOLUME PRICING</div>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
-              {[
-                ["15–49",  "$12.00/seat"],
-                ["50–74",  "$10.50/seat"],
-                ["75–99",  "$10.00/seat"],
-                ["100+",   "$9.99/seat"],
-              ].map(([range, price]) => (
-                <div key={range} style={{ color: S.textSoft }}>
-                  <strong style={{ color: S.text }}>{range}</strong> · {price}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Duration selector */}
-      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>2. Select Duration</div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Longer commitments get a discount</div>
-        </div>
-        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
-          {QUOTE_MONTHS.map(m => (
-            <button key={m.value} onClick={() => { setMonths(m.value); setCustomDaysMode(false); }}
-              style={{
-                border: `2px solid ${!customDaysMode && months === m.value ? "#6366f1" : S.border}`,
-                borderRadius: 14, padding: "12px 16px", background: !customDaysMode && months === m.value ? "#eef2ff" : "#fff",
-                cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>{m.label}</div>
-              {m.discount && (
-                <div style={{ fontSize: 10, fontWeight: 800, color: "#16a34a", background: "#dcfce7", padding: "2px 8px", borderRadius: 999 }}>{m.discount}</div>
-              )}
-            </button>
-          ))}
-          {/* Custom days button */}
-          <button
-            onClick={() => setCustomDaysMode(true)}
-            style={{
-              border: `2px solid ${customDaysMode ? "#6366f1" : S.border}`,
-              borderRadius: 14, padding: "12px 16px", background: customDaysMode ? "#eef2ff" : "#fff",
-              cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
-              gridColumn: "1 / -1",
-            }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>Custom days</div>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 999 }}>Flexible</div>
-          </button>
-          {customDaysMode && (
-            <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#f8fafc", borderRadius: 12, border: `1px solid ${S.border}` }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: S.text, whiteSpace: "nowrap" }}>Number of days:</label>
-              <input
-                type="number"
-                min={1}
-                max={730}
-                value={customDays}
-                onChange={e => setCustomDays(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value) || 1))}
-                style={{ ...inputStyle, width: 90, textAlign: "center", fontWeight: 700 }}
-              />
-              <span style={{ fontSize: 12, color: S.textSoft }}>
-                ≈ {typeof customDays === "number" ? (customDays / 30).toFixed(1) : "—"} months · CAD ${typeof customDays === "number" ? Math.round(discounted / 30 * customDays) : 0} total
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Quote summary */}
-      <div style={{ background: "linear-gradient(135deg,#eef2ff,#f5f3ff)", border: "2px solid #c7d2fe", borderRadius: 16, padding: "20px 24px" }}>
-        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#3730a3", marginBottom: 14 }}>YOUR QUOTE</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 0", fontSize: 13 }}>
-          <div>
-            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>PLAN</div>
-            <div style={{ fontWeight: 700, color: S.text }}>{effectiveSeats} seats</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>MONTHLY</div>
-            <div style={{ fontWeight: 700, color: S.text }}>
-              CAD ${discounted}
-              {disc > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: "#16a34a", fontWeight: 800 }}>({disc}% off)</span>}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
-            <div style={{ fontWeight: 700, color: S.text }}>{customDaysMode ? `${effectiveDays} days` : `${months} month${months > 1 ? "s" : ""}`}</div>
-          </div>
-        </div>
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
-            <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
-            <div style={{ fontSize: 11, color: "#6366f1" }}>for {customDaysMode ? `${effectiveDays} days` : `${months} month${months > 1 ? "s" : ""}`} · {effectiveSeats} seats</div>
-          </div>
-          <button
-            onClick={() => {
-              if (typeof customSeats !== "number" || customSeats < 15) {
-                setSeatsErr("Minimum 15 seats required");
-                return;
-              }
-              setStep("register");
-            }}
-            style={{ ...btnPrimary, padding: "14px 28px", fontSize: 14 }}
-          >
-            Proceed with this quote →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  /* ── Step 2: Register contract ── */
   const templateData = {
-    organizationName: orgName, organizationAddress: orgAddress,
-    billingContactName: billingName, billingEmail, invoiceEmail: invoiceEmail || billingEmail,
-    primaryAdminName: signerName, primaryAdminEmail: adminEmail || billingEmail,
-    selectedPlan: planKey, selectedPlanPrice: discounted,
-    startDate, effectiveDate: effectiveDate || startDate,
-    initialTerm: months === 1 ? "Monthly" : `${months} months`,
-    autoRenew, billingMethod: billing,
-    clbprepSignerName: "Soheila Azizi", clbprepSignerTitle: "Azizi Online Learning Services",
+    organizationName: orgName,
+    organizationAddress: orgAddress,
+    billingContactName: billingName,
+    billingEmail,
+    invoiceEmail: invoiceEmail || billingEmail,
+    primaryAdminName: signerName,
+    primaryAdminEmail: adminEmail || billingEmail,
+    selectedPlan: String(effectiveSeats),
+    selectedPlanPrice: monthlyAfterDiscount,
+    startDate,
+    effectiveDate: effectiveDate || startDate,
+    initialTerm: selectedDurationLabel,
+    autoRenew,
+    billingMethod: billing,
+    clbprepSignerName: "Soheila Azizi",
+    clbprepSignerTitle: "Azizi Online Learning Services",
     specialNotes: notes,
   };
 
+  if (step === "quote") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div
+          style={{
+            background: "linear-gradient(135deg,#1e3a5f,#12284b)",
+            borderRadius: 16,
+            padding: "16px 22px",
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <FileCheck size={22} style={{ flexShrink: 0, opacity: 0.8 }} />
+          <div>
+            <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, marginBottom: 3 }}>
+              Request a Quote
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.6 }}>
+              Select your seat plan and contract duration to see your pricing. If you are happy with the quote, you can proceed to register your contract.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+          <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>1. Select Seats</div>
+            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
+              Choose a common plan or enter any number (minimum {MIN_SEATS})
+            </div>
+          </div>
+          <div style={{ padding: "16px 20px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
+              {QUOTE_PLANS.map((p) => {
+                const presetSeats = Number(p.key);
+                const active = effectiveSeats === presetSeats;
+                return (
+                  <button
+                    key={p.key}
+                    onClick={() => {
+                      setCustomSeats(presetSeats);
+                      setSeatsErr("");
+                    }}
+                    style={{
+                      border: `2px solid ${active ? "#6366f1" : S.border}`,
+                      borderRadius: 12,
+                      padding: "10px 8px",
+                      background: active ? "#eef2ff" : "#fff",
+                      cursor: "pointer",
+                      textAlign: "center",
+                      transition: "all .15s",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: 14, color: active ? "#4338ca" : S.text }}>{p.key}</div>
+                    <div style={{ fontSize: 10, color: S.textSoft, marginTop: 1 }}>seats</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#4338ca" : S.text, marginTop: 4 }}>
+                      ${p.price}
+                      <span style={{ fontSize: 10, fontWeight: 400, color: S.textSoft }}>/mo</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 16px",
+                background: "#f8fafc",
+                borderRadius: 12,
+                border: `1px solid ${seatsErr ? "#fca5a5" : S.border}`,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, color: S.text, flexShrink: 0 }}>Custom seats:</div>
+              <input
+                type="number"
+                min={MIN_SEATS}
+                max={10000}
+                value={customSeats}
+                onChange={(e) => {
+                  const val = e.target.value === "" ? "" : parseInt(e.target.value, 10);
+                  setCustomSeats(val as number | "");
+                  if (typeof val === "number" && val < MIN_SEATS) {
+                    setSeatsErr(`Minimum ${MIN_SEATS} seats required`);
+                  } else {
+                    setSeatsErr("");
+                  }
+                }}
+                placeholder="e.g. 75"
+                style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 800, fontSize: 16 }}
+              />
+              <div style={{ fontSize: 12, color: S.textSoft }}>
+                {typeof customSeats === "number" && customSeats >= MIN_SEATS ? (
+                  <span style={{ color: "#16a34a", fontWeight: 700 }}>
+                    ${pricePerSeat(customSeats).toFixed(2)}/seat · CAD ${calcMonthlyPrice(customSeats)}/month
+                  </span>
+                ) : (
+                  <span style={{ color: S.textSoft }}>Enter a number ≥ {MIN_SEATS}</span>
+                )}
+              </div>
+            </div>
+            {seatsErr && (
+              <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6, paddingLeft: 4 }}>
+                ⚠ {seatsErr}
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, padding: "10px 14px", background: "#f1f5f9", borderRadius: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: S.textSoft, marginBottom: 6, letterSpacing: ".06em" }}>
+                VOLUME PRICING
+              </div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
+                {[
+                  ["15–49", "$12.00/seat"],
+                  ["50–74", "$10.50/seat"],
+                  ["75–99", "$10.00/seat"],
+                  ["100+", "$9.99/seat"],
+                ].map(([range, price]) => (
+                  <div key={range} style={{ color: S.textSoft }}>
+                    <strong style={{ color: S.text }}>{range}</strong> · {price}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+          <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>2. Select Duration</div>
+            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
+              Longer commitments get a discount. Custom days start at {MIN_CUSTOM_DAYS} and receive the same discounts once they reach 90, 180, or 360 days.
+            </div>
+          </div>
+          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+              {QUOTE_MONTHS.map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => {
+                    setMonths(m.value);
+                    setDurationMode("preset");
+                    setDurationErr("");
+                  }}
+                  style={{
+                    border: `2px solid ${durationMode === "preset" && months === m.value ? "#6366f1" : S.border}`,
+                    borderRadius: 14,
+                    padding: "12px 16px",
+                    background: durationMode === "preset" && months === m.value ? "#eef2ff" : "#fff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "all .15s",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>{m.label}</div>
+                  {m.discount && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 800,
+                        color: "#16a34a",
+                        background: "#dcfce7",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      {m.discount}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div
+              onClick={() => setDurationMode("custom")}
+              style={{
+                border: `2px solid ${durationMode === "custom" ? "#6366f1" : S.border}`,
+                borderRadius: 14,
+                padding: "14px 16px",
+                background: durationMode === "custom" ? "#eef2ff" : "#fff",
+                transition: "all .15s",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: S.text }}>Custom days</div>
+                  <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
+                    Minimum {MIN_CUSTOM_DAYS} days. Discount starts at 90 days.
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: selectedDiscount > 0 && durationMode === "custom" ? "#16a34a" : "#6366f1",
+                    background: selectedDiscount > 0 && durationMode === "custom" ? "#dcfce7" : "#eef2ff",
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                  }}
+                >
+                  {durationMode === "custom" && selectedDiscount > 0 ? `Save ${selectedDiscount}%` : "Flexible"}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 14px",
+                  background: durationMode === "custom" ? "#ffffff" : "#f8fafc",
+                  borderRadius: 12,
+                  border: `1px solid ${durationErr ? "#fca5a5" : S.border}`,
+                }}
+              >
+                <label style={{ fontSize: 12, fontWeight: 700, color: S.text, whiteSpace: "nowrap" }}>
+                  Number of days:
+                </label>
+                <input
+                  type="number"
+                  min={MIN_CUSTOM_DAYS}
+                  max={730}
+                  value={customDays}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? "" : parseInt(e.target.value, 10);
+                    setDurationMode("custom");
+                    setCustomDays(val as number | "");
+                    if (typeof val === "number" && val < MIN_CUSTOM_DAYS) {
+                      setDurationErr(`Minimum ${MIN_CUSTOM_DAYS} days required`);
+                    } else {
+                      setDurationErr("");
+                    }
+                  }}
+                  style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 700 }}
+                />
+                <span style={{ fontSize: 12, color: S.textSoft }}>
+                  {typeof customDays === "number" && customDays >= MIN_CUSTOM_DAYS ? (
+                    <>
+                      ≈ {(customDays / 30).toFixed(1)} months ·
+                      <span style={{ color: "#16a34a", fontWeight: 700 }}> CAD ${Math.round((calcMonthlyPrice(effectiveSeats) * (1 - getCustomDaysDiscount(customDays) / 100) * customDays) / 30)} total</span>
+                    </>
+                  ) : (
+                    `Enter a number ≥ ${MIN_CUSTOM_DAYS}`
+                  )}
+                </span>
+              </div>
+              {durationErr && (
+                <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6 }}>
+                  ⚠ {durationErr}
+                </div>
+              )}
+              <div style={{ marginTop: 10, fontSize: 11, color: S.textSoft }}>
+                30–89 days: no discount · 90–179 days: 5% off · 180–359 days: 8% off · 360+ days: 12% off
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "linear-gradient(135deg,#eef2ff,#f5f3ff)",
+            border: "2px solid #c7d2fe",
+            borderRadius: 16,
+            padding: "20px 24px",
+          }}
+        >
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#3730a3", marginBottom: 14 }}>
+            YOUR QUOTE
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 0", fontSize: 13 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>PLAN</div>
+              <div style={{ fontWeight: 700, color: S.text }}>{effectiveSeats} seats</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>MONTHLY</div>
+              <div style={{ fontWeight: 700, color: S.text }}>
+                CAD ${monthlyAfterDiscount}
+                {selectedDiscount > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 11, color: "#16a34a", fontWeight: 800 }}>
+                    ({selectedDiscount}% off)
+                  </span>
+                )}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
+              <div style={{ fontWeight: 700, color: S.text }}>{selectedDurationLabel}</div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 14,
+              borderTop: "1px solid #c7d2fe",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
+              <div style={{ fontSize: 11, color: "#6366f1" }}>
+                for {selectedDurationLabel} · {effectiveSeats} seats
+              </div>
+            </div>
+            <button onClick={handleContinueToRegister} style={{ ...btnPrimary, padding: "14px 28px", fontSize: 14 }}>
+              Proceed with this quote →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Back to quote */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button onClick={() => setStep("quote")} style={{ ...btnOutline, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        <button
+          onClick={() => setStep("quote")}
+          style={{ ...btnOutline, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}
+        >
           ← Back to Quote
         </button>
         <div style={{ fontSize: 12, color: S.textSoft }}>
-          Quote: <strong>{effectiveSeats} seats · {months} month{months > 1 ? "s" : ""} · CAD ${total}</strong>
+          Quote: <strong>{effectiveSeats} seats · {selectedDurationLabel} · CAD ${total}</strong>
         </div>
       </div>
 
-      {/* Org info */}
       <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
         <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Organization Information</div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Fill in your organization's details for the contract</div>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>
+            Organization Information
+          </div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
+            Fill in your organization's details for the contract
+          </div>
         </div>
         <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {[
-            { label: "Organization Legal Name *", val: orgName,      set: setOrgName,      span: 2 },
-            { label: "Organization Address",       val: orgAddress,   set: setOrgAddress,   span: 2 },
-            { label: "Billing Contact Name *",     val: billingName,  set: setBillingName   },
-            { label: "Billing Email *",             val: billingEmail, set: setBillingEmail, type: "email" },
-            { label: "Invoice Email",               val: invoiceEmail, set: setInvoiceEmail, type: "email" },
-            { label: "Admin Email",                 val: adminEmail,   set: setAdminEmail,   type: "email" },
-            { label: "Start Date *",                val: startDate,    set: setStartDate,    type: "date" },
-            { label: "Effective Date",              val: effectiveDate,set: setEffectiveDate,type: "date" },
+            { label: "Organization Legal Name *", val: orgName, set: setOrgName, span: 2 },
+            { label: "Organization Address", val: orgAddress, set: setOrgAddress, span: 2 },
+            { label: "Billing Contact Name *", val: billingName, set: setBillingName },
+            { label: "Billing Email *", val: billingEmail, set: setBillingEmail, type: "email" },
+            { label: "Invoice Email", val: invoiceEmail, set: setInvoiceEmail, type: "email" },
+            { label: "Admin Email", val: adminEmail, set: setAdminEmail, type: "email" },
+            { label: "Start Date *", val: startDate, set: setStartDate, type: "date" },
+            { label: "Effective Date", val: effectiveDate, set: setEffectiveDate, type: "date" },
           ].map(({ label, val, set, span, type }) => (
             <div key={label} style={{ gridColumn: span === 2 ? "1 / -1" : undefined }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
-              <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
-                style={{ ...inputStyle, width: "100%" }} />
+              <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
+                {label}
+              </label>
+              <input
+                type={type || "text"}
+                value={val}
+                onChange={(e) => set(e.target.value)}
+                style={{ ...inputStyle, width: "100%" }}
+              />
             </div>
           ))}
+
+          {renewalNotice && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border:
+                    renewalNotice.tone === "success"
+                      ? "1px solid #86efac"
+                      : renewalNotice.tone === "warn"
+                        ? "1px solid #fcd34d"
+                        : renewalNotice.tone === "info"
+                          ? "1px solid #bfdbfe"
+                          : `1px solid ${S.border}`,
+                  background:
+                    renewalNotice.tone === "success"
+                      ? "#f0fdf4"
+                      : renewalNotice.tone === "warn"
+                        ? "#fffbeb"
+                        : renewalNotice.tone === "info"
+                          ? "#eff6ff"
+                          : "#f8fafc",
+                }}
+              >
+                <AlertCircle
+                  size={16}
+                  style={{
+                    flexShrink: 0,
+                    marginTop: 2,
+                    color:
+                      renewalNotice.tone === "success"
+                        ? "#16a34a"
+                        : renewalNotice.tone === "warn"
+                          ? "#d97706"
+                          : renewalNotice.tone === "info"
+                            ? "#2563eb"
+                            : S.textSoft,
+                  }}
+                />
+                <div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      color:
+                        renewalNotice.tone === "success"
+                          ? "#166534"
+                          : renewalNotice.tone === "warn"
+                            ? "#92400e"
+                            : renewalNotice.tone === "info"
+                              ? "#1d4ed8"
+                              : S.text,
+                      marginBottom: 3,
+                    }}
+                  >
+                    {renewalNotice.title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      color:
+                        renewalNotice.tone === "success"
+                          ? "#166534"
+                          : renewalNotice.tone === "warn"
+                            ? "#92400e"
+                            : renewalNotice.tone === "info"
+                              ? "#1e40af"
+                              : S.textSoft,
+                    }}
+                  >
+                    {renewalNotice.body}
+                  </div>
+                  {projectedEndDate && (
+                    <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, color: "#15803d" }}>
+                      Projected new expiry: {formatContractDate(projectedEndDate.toISOString())}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Billing Method</label>
-            <select value={billing} onChange={e => setBilling(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
+              Billing Method
+            </label>
+            <select value={billing} onChange={(e) => setBilling(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
               <option>Stripe invoice</option>
               <option>Stripe payment link</option>
               <option>Bank transfer</option>
               <option>Other</option>
             </select>
           </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
-            <input type="checkbox" id="crf-autorenew" checked={autoRenew} onChange={e => setAutoRenew(e.target.checked)}
-              style={{ accentColor: S.blue, width: 15, height: 15 }} />
-            <label htmlFor="crf-autorenew" style={{ fontSize: 12, color: S.text, cursor: "pointer" }}>Auto-renew at end of term</label>
+            <input
+              type="checkbox"
+              id="crf-autorenew"
+              checked={autoRenew}
+              onChange={(e) => setAutoRenew(e.target.checked)}
+              style={{ accentColor: S.blue, width: 15, height: 15 }}
+            />
+            <label htmlFor="crf-autorenew" style={{ fontSize: 12, color: S.text, cursor: "pointer" }}>
+              Auto-renew at end of term
+            </label>
           </div>
+
           <div style={{ gridColumn: "1 / -1" }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Special Notes</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
+              Special Notes
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
               placeholder="Any additional requests or notes…"
-              style={{ ...inputStyle, width: "100%", resize: "vertical" }} />
+              style={{ ...inputStyle, width: "100%", resize: "vertical" }}
+            />
           </div>
         </div>
       </div>
 
-      {/* Full contract to read */}
       <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
         <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Service Agreement</div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Read the full contract below before agreeing and signing</div>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>
+            Service Agreement
+          </div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
+            Read the full contract below before agreeing and signing
+          </div>
         </div>
         <div style={{ padding: "24px 28px", maxHeight: 500, overflowY: "auto", borderBottom: `1px solid ${S.border}` }}>
           <ContractTemplate
@@ -1019,17 +1541,26 @@ function ContractRequestFlow({
           />
         </div>
 
-        {/* Agreement checkbox */}
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${S.border}` }}>
-          <label style={{
-            display: "flex", alignItems: "flex-start", gap: 12,
-            padding: "14px 16px",
-            background: agreed ? "#f0fdf4" : "#f8fafc",
-            border: `2px solid ${agreed ? "#4ade80" : S.border}`,
-            borderRadius: 12, cursor: "pointer", transition: "all .15s",
-          }}>
-            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)}
-              style={{ marginTop: 2, accentColor: "#16a34a", width: 16, height: 16, flexShrink: 0 }} />
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              padding: "14px 16px",
+              background: agreed ? "#f0fdf4" : "#f8fafc",
+              border: `2px solid ${agreed ? "#4ade80" : S.border}`,
+              borderRadius: 12,
+              cursor: "pointer",
+              transition: "all .15s",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              style={{ marginTop: 2, accentColor: "#16a34a", width: 16, height: 16, flexShrink: 0 }}
+            />
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: S.text, marginBottom: 3 }}>
                 I have read and agree to the full Service Agreement above
@@ -1041,35 +1572,63 @@ function ContractRequestFlow({
           </label>
         </div>
 
-        {/* Signature — visible only after agreeing */}
         {agreed && (
           <div style={{ padding: "16px 20px" }}>
-            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>Your Signature</div>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>
+              Your Signature
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               {[
-                { label: "Full Name *",              val: signerName,   set: setSignerName },
-                { label: "Title / Role *",            val: signerTitle,  set: setSignerTitle },
-                { label: "Electronic Signature *",    val: signature,    set: setSignature,  italic: true },
-                { label: "Date *",                    val: signedDate,   set: setSignedDate, type: "date" },
+                { label: "Full Name *", val: signerName, set: setSignerName },
+                { label: "Title / Role *", val: signerTitle, set: setSignerTitle },
+                { label: "Electronic Signature *", val: signature, set: setSignature, italic: true },
+                { label: "Date *", val: signedDate, set: setSignedDate, type: "date" },
               ].map(({ label, val, set, type, italic }) => (
                 <div key={label}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
-                  <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
+                  <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
+                    {label}
+                  </label>
+                  <input
+                    type={type || "text"}
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
                     placeholder={label.includes("Signature") ? "Type your full legal name" : undefined}
-                    style={{ ...inputStyle, width: "100%", ...(italic ? { fontStyle: "italic", fontFamily: "Georgia, serif" } : {}) }} />
+                    style={{
+                      ...inputStyle,
+                      width: "100%",
+                      ...(italic ? { fontStyle: "italic", fontFamily: "Georgia, serif" } : {}),
+                    }}
+                  />
                 </div>
               ))}
             </div>
 
             {submitErr && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, fontSize: 12, color: "#dc2626", fontWeight: 600, marginBottom: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 14px",
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: 10,
+                  fontSize: 12,
+                  color: "#dc2626",
+                  fontWeight: 600,
+                  marginBottom: 14,
+                }}
+              >
                 ⚠ {submitErr}
               </div>
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={handleSubmit} disabled={submitting}
-                style={{ ...btnPrimary, opacity: submitting ? 0.7 : 1, padding: "12px 28px", fontSize: 13 }}>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                style={{ ...btnPrimary, opacity: submitting ? 0.7 : 1, padding: "12px 28px", fontSize: 13 }}
+              >
                 {submitting ? "Submitting…" : "Submit Contract to CLBPrep →"}
               </button>
             </div>
@@ -1079,6 +1638,7 @@ function ContractRequestFlow({
     </div>
   );
 }
+
 
 export default function OrgPartnerAdmin() {
   const nav = useNavigate();
@@ -1638,6 +2198,8 @@ export default function OrgPartnerAdmin() {
       const res = { documents: docs };
       if (!res.documents.length) {
         setContract(null);
+        setAllContracts([]);
+        setPendingRenewal(null);
         return;
       }
 
@@ -1649,10 +2211,8 @@ export default function OrgPartnerAdmin() {
         if (pa !== pb) return pa - pb;
         // Among paid contracts: prefer the one valid for today
         if (a.status === "paid" && b.status === "paid") {
-          const afd = (() => { try { return typeof a.formData === "string" ? JSON.parse(a.formData) : (a.formData || {}); } catch { return {}; } })();
-          const bfd = (() => { try { return typeof b.formData === "string" ? JSON.parse(b.formData) : (b.formData || {}); } catch { return {}; } })();
-          const aExpiry = (() => { const s = afd.effectiveDate || afd.startDate; if (!s) return 0; const d = new Date(s); d.setUTCMonth(d.getUTCMonth() + (Number(afd.months) || 1)); return d.getTime(); })();
-          const bExpiry = (() => { const s = bfd.effectiveDate || bfd.startDate; if (!s) return 0; const d = new Date(s); d.setUTCMonth(d.getUTCMonth() + (Number(bfd.months) || 1)); return d.getTime(); })();
+          const aExpiry = getContractTiming(a).end?.getTime() || 0;
+          const bExpiry = getContractTiming(b).end?.getTime() || 0;
           const aValid = aExpiry > todayMs;
           const bValid = bExpiry > todayMs;
           if (aValid && !bValid) return -1;
@@ -1664,8 +2224,15 @@ export default function OrgPartnerAdmin() {
         return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
       });
 
-      setContract(sorted[0] as unknown as OrgContract);
-      setAllContracts(sorted as unknown as OrgContract[]);
+      const topContract = sorted[0] as unknown as OrgContract;
+      const uniqueContracts = Array.from(
+        new Map(
+          [topContract, ...sorted].filter(Boolean).map((item: any) => [item.$id, item])
+        ).values()
+      ) as unknown as OrgContract[];
+
+      setContract(topContract);
+      setAllContracts(uniqueContracts);
 
       // If the top contract is paid, check if there's also a pending renewal
       const top = sorted[0] as any;
@@ -1688,7 +2255,7 @@ export default function OrgPartnerAdmin() {
     } finally {
       setContractLoading(false);
     }
-  }, [orgUserId]);
+  }, [orgUserId, partnerName]);
 
   // Keep ref in sync so the checkout useEffect (defined earlier) can call it safely
   useEffect(() => { loadContractRef.current = loadContract; }, [loadContract]);
@@ -3155,16 +3722,22 @@ export default function OrgPartnerAdmin() {
                     Signed by <strong>{contract.orgSignerName}</strong> on {formatContractDate(contract.orgSignedAt)}<br />
                     {(fd?.effectiveDate || fd?.startDate) && <>Service starts <strong>{formatContractDate(fd?.effectiveDate || fd?.startDate)}</strong><br /></>}
                     {(() => {
-                      const start = fd?.effectiveDate || fd?.startDate;
-                      const months = Number(fd?.months) || 1;
-                      if (!start) return null;
-                      const d = new Date(start);
-                      d.setUTCMonth(d.getUTCMonth() + months);
-                      const expiry = d.toLocaleDateString("en-CA", { timeZone: "UTC" });
-                      const today = new Date();
-                      today.setUTCHours(0, 0, 0, 0);
-                      const daysLeft = Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86400000));
-                      return <>Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)</>;
+                      const timing = getContractTiming(contract);
+                      if (!timing.end) return null;
+                      const expiry = formatContractDate(timing.end.toISOString());
+                      const today = parseDateOnlyUTC(new Date());
+                      const daysLeft = today ? Math.max(0, Math.ceil((timing.end.getTime() - today.getTime()) / MS_PER_DAY)) : 0;
+                      return (
+                        <>
+                          Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)
+                          {timing.carryoverDays > 0 && (
+                            <>
+                              <br />
+                              Includes <strong>{timing.carryoverDays}</strong> carryover day{timing.carryoverDays !== 1 ? "s" : ""}
+                            </>
+                          )}
+                        </>
+                      );
                     })()}
                   </div>
                   {/* PDF actions */}
@@ -3244,6 +3817,7 @@ export default function OrgPartnerAdmin() {
                     partnerName={partnerName}
                     orgUserId={orgUserId}
                     adminName={adminName}
+                    activeContract={contract}
                     onSubmitted={() => {
                       setShowContractRequestFlow(false);
                       loadContract();
@@ -3257,7 +3831,7 @@ export default function OrgPartnerAdmin() {
                 )}
 
                 {/* ── All contracts history ── */}
-                {allContracts.length > 1 && (
+                {allContracts.length > 0 && (
                   <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
                     <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
                       <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>All Contracts</div>
@@ -3265,7 +3839,8 @@ export default function OrgPartnerAdmin() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column" }}>
                       {allContracts.map((c: any, i: number) => {
-                        const cfd = parseContractFormData(c);
+                        const cfd = safeParseContractFormData(c);
+                        const cTiming = getContractTiming(c);
                         const isActive = c.$id === contract?.$id;
                         const statusColors: Record<string, { bg: string; text: string; label: string }> = {
                           paid:            { bg: "#dcfce7", text: "#15803d", label: "Active" },
@@ -3301,7 +3876,8 @@ export default function OrgPartnerAdmin() {
                                   {isActive && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
                                 </div>
                                 <div style={{ fontSize: 11, color: S.textSoft }}>
-                                  {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Submitted: {formatContractDate(c.$createdAt)}
+                                  {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
+                                  {cTiming.carryoverDays > 0 && ` · +${cTiming.carryoverDays} carryover day${cTiming.carryoverDays !== 1 ? "s" : ""}`}
                                 </div>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3334,14 +3910,8 @@ export default function OrgPartnerAdmin() {
 
             if (contract && contract.status === "expired") {
               // Calculate expiry date for display
-              const expiredStart = fd?.effectiveDate || fd?.startDate;
-              const expiredMonths = Number(fd?.months) || 1;
-              let expiryDisplay = "—";
-              if (expiredStart) {
-                const d = new Date(expiredStart);
-                d.setUTCMonth(d.getUTCMonth() + expiredMonths);
-                expiryDisplay = d.toLocaleDateString("en-CA", { timeZone: "UTC" });
-              }
+              const expiredTiming = contract ? getContractTiming(contract) : null;
+              const expiryDisplay = expiredTiming?.end ? formatContractDate(expiredTiming.end.toISOString()) : "—";
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {/* ── Expired notice ── */}
@@ -3441,6 +4011,7 @@ export default function OrgPartnerAdmin() {
                     partnerName={partnerName}
                     orgUserId={orgUserId}
                     adminName={adminName}
+                    activeContract={contract}
                     onSubmitted={() => {
                       setShowContractRequestFlow(false);
                       loadContract();
@@ -3471,7 +4042,7 @@ export default function OrgPartnerAdmin() {
                       {[
                         ["Organization", fd?.organizationName],
                         ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/mo`],
-                        ["Duration", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
+                        ["Duration", fd?.initialTerm || `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
                         ["Total", `CAD $${fd?.totalPrice}`],
                         ["Start Date", fd?.startDate],
                         ["Submitted", new Date(contract.createdAt).toLocaleDateString("en-CA")],
@@ -3522,6 +4093,7 @@ export default function OrgPartnerAdmin() {
               partnerName={partnerName}
               orgUserId={orgUserId}
               adminName={adminName}
+              activeContract={contract}
               onSubmitted={() => {
                 setShowContractRequestFlow(false);
                 loadContract();

@@ -352,6 +352,17 @@ function getPaidContractPhase(contract: any, todayArg?: Date | null) {
   return { timing, phase: "active" as const };
 }
 
+function shouldFreezeContractSnapshot(contract: any, todayArg?: Date | null): boolean {
+  if (!contract) return false;
+
+  const status = String(contract.status || "").trim().toLowerCase();
+  if (["expired", "suspended", "cancelled"].includes(status)) return true;
+  if (status !== "paid") return false;
+
+  const phase = getPaidContractPhase(contract, todayArg).phase;
+  return phase === "expired";
+}
+
 
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -2465,9 +2476,10 @@ export default function OrgPartnerAdmin() {
     if (!allContracts.length) return;
 
     const timer = window.setTimeout(() => {
+      const today = getTodayUtcDate();
       allContracts.forEach((item: any) => {
         if (!item?.$id) return;
-        if (!["paid", "expired", "suspended"].includes(String(item.status || ""))) return;
+        if (!shouldFreezeContractSnapshot(item, today)) return;
         if (getStoredContractSnapshotHtml(item)) return;
 
         const el = contractPdfRefs.current.get(item.$id);
@@ -2485,7 +2497,9 @@ export default function OrgPartnerAdmin() {
     const storedHtml = getStoredContractSnapshotHtml(c);
     const el = contractPdfRefs.current.get((c as any).$id);
     const liveHtml = el?.innerHTML?.trim() || "";
-    const html = storedHtml || liveHtml;
+    const html = shouldFreezeContractSnapshot(c)
+      ? (storedHtml || liveHtml)
+      : (liveHtml || storedHtml);
     if (!html) { window.alert("Contract preview is not ready yet."); return; }
     const fullHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
       <title>CLBPrep Contract</title>
@@ -2501,7 +2515,10 @@ export default function OrgPartnerAdmin() {
 
   const openContractPdfWindow = useCallback((autoPrint = false) => {
     const storedHtml = contract ? getStoredContractSnapshotHtml(contract) : "";
-    const html = storedHtml || contractPdfRef.current?.innerHTML?.trim() || "";
+    const liveHtml = contractPdfRef.current?.innerHTML?.trim() || "";
+    const html = shouldFreezeContractSnapshot(contract)
+      ? (storedHtml || liveHtml)
+      : (liveHtml || storedHtml);
     if (!html) {
       window.alert("Contract preview is not ready yet.");
       return;
@@ -3958,14 +3975,8 @@ export default function OrgPartnerAdmin() {
                       );
                     })()}
                   </div>
-                  {/* PDF actions */}
-                  <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
-                    <button type="button" onClick={() => openAnyContractPdf(contract, false)} style={btnOutline}>
-                      <FolderOpen size={14} /> View PDF
-                    </button>
-                    <button type="button" onClick={() => openAnyContractPdf(contract, true)} style={btnPrimary}>
-                      <Download size={14} /> Download / Print PDF
-                    </button>
+                  <div style={{ marginTop: 18, fontSize: 11, color: S.textSoft }}>
+                    View or download contract files from the <strong>All Contracts</strong> section below.
                   </div>
                 </div>
 

@@ -4037,18 +4037,18 @@ export default function OrgPartnerAdmin() {
                   <div>
                     <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Need more seats or a new term?</div>
                     <div style={{ fontSize: 12, color: S.textSoft }}>
-                      Request a new quote and sign a new contract to adjust your plan.
+                      {pendingRenewal
+                        ? "You already have a scheduled or pending contract, but you can still request another quote if you need different seats or dates."
+                        : "Request a new quote and sign a new contract to adjust your plan."}
                     </div>
                   </div>
-                  {!pendingRenewal && (
-                    <button
-                      type="button"
-                      onClick={() => setShowContractRequestFlow((prev) => !prev)}
-                      style={showContractRequestFlow ? btnOutline : btnPrimary}
-                    >
-                      {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowContractRequestFlow((prev) => !prev)}
+                    style={showContractRequestFlow ? btnOutline : btnPrimary}
+                  >
+                    {showContractRequestFlow ? "Hide Quote Form" : "Request New Seats / Contract"}
+                  </button>
                 </div>
 
                 {showContractRequestFlow && (

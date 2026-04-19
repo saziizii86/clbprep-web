@@ -352,6 +352,61 @@ function getPaidContractPhase(contract: any, todayArg?: Date | null) {
   return { timing, phase: "active" as const };
 }
 
+function pickLatestPaidCoverageContract(contracts: any[], todayArg?: Date | null) {
+  const today = todayArg || getTodayUtcDate();
+  return [...contracts]
+    .filter((doc: any) => doc?.status === "paid")
+    .filter((doc: any) => {
+      const phase = getPaidContractPhase(doc, today).phase;
+      return phase === "active" || phase === "scheduled";
+    })
+    .sort((a: any, b: any) => {
+      const aTiming = getContractTiming(a);
+      const bTiming = getContractTiming(b);
+      const aEnd = aTiming.end?.getTime() || 0;
+      const bEnd = bTiming.end?.getTime() || 0;
+      if (aEnd !== bEnd) return bEnd - aEnd;
+      const aStart = aTiming.effectiveStart?.getTime() || 0;
+      const bStart = bTiming.effectiveStart?.getTime() || 0;
+      if (aStart !== bStart) return bStart - aStart;
+      return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
+    })[0] || null;
+}
+
+function isCandidateWithinRenewalWindow(baseContract: any, candidateContract: any) {
+  if (!baseContract || !candidateContract) return true;
+  const baseTiming = getContractTiming(baseContract);
+  const candidateTiming = getContractTiming(candidateContract);
+  if (!baseTiming.end || !candidateTiming.effectiveStart) return true;
+  const earliestAllowed = addUtcDays(baseTiming.end, -3);
+  return candidateTiming.effectiveStart.getTime() >= earliestAllowed.getTime();
+}
+
+function pickQueuedRenewalContract(contracts: any[], currentPaid: any, todayArg?: Date | null) {
+  const today = todayArg || getTodayUtcDate();
+
+  const scheduledPaid = [...contracts]
+    .filter((doc: any) => doc?.status === "paid")
+    .filter((doc: any) => getPaidContractPhase(doc, today).phase === "scheduled")
+    .filter((doc: any) => isCandidateWithinRenewalWindow(currentPaid, doc))
+    .sort((a: any, b: any) => {
+      const aStart = getContractTiming(a).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bStart = getContractTiming(b).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
+      if (aStart !== bStart) return aStart - bStart;
+      return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
+    })[0] || null;
+
+  const pendingPayment = [...contracts]
+    .filter((doc: any) => doc?.status === "pending_payment")
+    .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
+
+  const pendingReview = [...contracts]
+    .filter((doc: any) => ["pending_admin", "pending_org"].includes(String(doc?.status || "")))
+    .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
+
+  return scheduledPaid || pendingPayment || pendingReview || null;
+}
+
 function shouldFreezeContractSnapshot(contract: any, todayArg?: Date | null): boolean {
   if (!contract) return false;
 
@@ -816,6 +871,12 @@ function ContractRequestFlow({
     [activeContract]
   );
 
+  const activeCoverageLabel = React.useMemo(() => {
+    if (!activeContract || activeContract.status !== "paid") return "current contract";
+    const phase = getPaidContractPhase(activeContract).phase;
+    return phase === "scheduled" ? "latest paid contract" : "current contract";
+  }, [activeContract]);
+
   const effectiveSeats =
     typeof customSeats === "number" && customSeats >= MIN_SEATS ? customSeats : 20;
   const selectedDurationDays =
@@ -919,9 +980,9 @@ function ContractRequestFlow({
     if (!effectiveDateForValidation) {
       return {
         tone: "info" as const,
-        title: "Current contract on file",
+        title: "Paid contract on file",
         body:
-          `Your current contract expires on ${expiryLabel}. ` +
+          `Your paid service is currently covered until ${expiryLabel}. ` +
           `You can sign the new contract today, but the effective date should normally be between ${suggestedStartLabel} and ${expiryLabel} so service continues without disruption. ` +
           `If the effective date is within the last 3 days, those remaining days will be added to the new expiry date.`,
       };
@@ -931,16 +992,16 @@ function ContractRequestFlow({
       return {
         tone: "warn" as const,
         title: "Adjust the effective date",
-        body: `${effectiveDateErr} Your current contract expires on ${expiryLabel}.`,
+        body: `${effectiveDateErr} Your ${activeCoverageLabel} expires on ${expiryLabel}.`,
       };
     }
 
     if (overlapDays > 3) {
       return {
         tone: "warn" as const,
-        title: "This effective date overlaps too early",
+        title: "This effective date overlaps existing paid service",
         body:
-          `You already have an active contract that expires on ${expiryLabel}. ` +
+          `You already have paid service covered until ${expiryLabel}. ` +
           `Only the last 3 remaining days can be carried forward. ` +
           `To avoid unnecessary overlap, choose ${suggestedStartLabel} or later.`,
       };
@@ -951,7 +1012,7 @@ function ContractRequestFlow({
         tone: "success" as const,
         title: `${carryoverDays} day${carryoverDays !== 1 ? "s" : ""} will be added to the new expiry date`,
         body:
-          `Your current contract expires on ${expiryLabel}. ` +
+          `Your ${activeCoverageLabel} expires on ${expiryLabel}. ` +
           `Because this contract becomes effective within the final 3 days, those ${carryoverDays} remaining day${carryoverDays !== 1 ? "s" : ""} ` +
           `will be added. New projected expiry: ${projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : "—"}.`,
       };
@@ -960,9 +1021,9 @@ function ContractRequestFlow({
     return {
       tone: "neutral" as const,
       title: "Effective date is valid",
-      body: `Your current contract expires on ${expiryLabel}. This effective date will continue service without disruption.`,
+      body: `Your ${activeCoverageLabel} expires on ${expiryLabel}. This effective date will continue service without disruption.`,
     };
-  }, [activeTiming, carryoverDays, effectiveDateErr, effectiveDateForValidation, overlapDays, projectedEndDate, recommendedRenewalStart]);
+  }, [activeCoverageLabel, activeTiming, carryoverDays, effectiveDateErr, effectiveDateForValidation, overlapDays, projectedEndDate, recommendedRenewalStart]);
 
   const handleContinueToRegister = () => {
     let hasError = false;
@@ -1024,12 +1085,12 @@ function ContractRequestFlow({
       const termMonths = Math.max(1, Math.ceil(selectedDurationDays / 30));
       const systemNoteParts = [
         notes.trim(),
-        activeTiming?.end ? `Current contract expires on ${formatContractDate(activeTiming.end.toISOString())}.` : "",
+        activeTiming?.end ? `${activeCoverageLabel[0].toUpperCase() + activeCoverageLabel.slice(1)} expires on ${formatContractDate(activeTiming.end.toISOString())}.` : "",
         carryoverForSubmit > 0
           ? `${carryoverForSubmit} carryover day${carryoverForSubmit !== 1 ? "s" : ""} should be added because the new contract starts within the final 3 days of the current term.`
           : "",
         overlapDays > 3
-          ? `Selected effective date overlaps the current contract by ${overlapDays} days.`
+          ? `Selected effective date overlaps existing paid service by ${overlapDays} days.`
           : "",
       ].filter(Boolean);
 
@@ -1772,6 +1833,7 @@ export default function OrgPartnerAdmin() {
   const [orgUserId, setOrgUserId] = useState("");
   const [contract,        setContract]        = useState<OrgContract | null>(null);
   const [pendingRenewal,  setPendingRenewal]  = useState<OrgContract | null>(null);
+  const [renewalGuardContract, setRenewalGuardContract] = useState<OrgContract | null>(null);
   const [allContracts,    setAllContracts]    = useState<OrgContract[]>([]);
   const [contractLoading, setContractLoading] = useState(false);
   const [showContractRequestFlow, setShowContractRequestFlow] = useState(false);
@@ -2308,6 +2370,7 @@ export default function OrgPartnerAdmin() {
         setContract(null);
         setAllContracts([]);
         setPendingRenewal(null);
+        setRenewalGuardContract(null);
         return;
       }
 
@@ -2325,14 +2388,8 @@ export default function OrgPartnerAdmin() {
           return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
         })[0] || null;
 
-      const scheduledPaid = [...paidContracts]
-        .filter((doc: any) => getPaidContractPhase(doc, today).phase === "scheduled")
-        .sort((a: any, b: any) => {
-          const aStart = getContractTiming(a).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
-          const bStart = getContractTiming(b).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
-          if (aStart !== bStart) return aStart - bStart;
-          return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
-        })[0] || null;
+      const latestPaidCoverage = pickLatestPaidCoverageContract(docs, today);
+      const queuedRenewal = currentPaid ? pickQueuedRenewalContract(docs, currentPaid, today) : null;
 
       const pendingPayment = docs
         .filter((doc: any) => doc.status === "pending_payment")
@@ -2350,7 +2407,7 @@ export default function OrgPartnerAdmin() {
 
       const displayContract =
         currentPaid ||
-        scheduledPaid ||
+        latestPaidCoverage ||
         pendingPayment ||
         pendingReview ||
         expiredOrOther ||
@@ -2399,19 +2456,22 @@ export default function OrgPartnerAdmin() {
 
       setContract(displayContract as OrgContract | null);
       setAllContracts(uniqueContracts);
+      setRenewalGuardContract((latestPaidCoverage || currentPaid || null) as OrgContract | null);
 
-      const queuedRenewal =
+      const nextQueuedRenewal =
         currentPaid
-          ? (scheduledPaid || pendingPayment || pendingReview)
+          ? queuedRenewal
           : (pendingPayment || pendingReview || null);
 
-      setPendingRenewal((queuedRenewal || null) as OrgContract | null);
+      setPendingRenewal((nextQueuedRenewal || null) as OrgContract | null);
     } catch (e) {
       console.error("Failed to load contract:", e);
       try {
         const doc = await getContractByOrgId(orgUserId);
         setContract(doc);
         setAllContracts(doc ? [doc] : []);
+        setPendingRenewal(null);
+        setRenewalGuardContract(doc && doc.status === "paid" ? doc : null);
       } catch {}
     } finally {
       setContractLoading(false);
@@ -4056,7 +4116,7 @@ export default function OrgPartnerAdmin() {
                     partnerName={partnerName}
                     orgUserId={orgUserId}
                     adminName={adminName}
-                    activeContract={contract}
+                    activeContract={renewalGuardContract || contract || null}
                     onSubmitted={() => {
                       setShowContractRequestFlow(false);
                       loadContract();
@@ -4216,6 +4276,7 @@ export default function OrgPartnerAdmin() {
                       partnerName={partnerName}
                       orgUserId={orgUserId}
                       adminName={adminName}
+                      activeContract={renewalGuardContract || contract || null}
                       onSubmitted={() => {
                         setShowContractRequestFlow(false);
                         loadContract();
@@ -4257,7 +4318,7 @@ export default function OrgPartnerAdmin() {
                     partnerName={partnerName}
                     orgUserId={orgUserId}
                     adminName={adminName}
-                    activeContract={contract}
+                    activeContract={renewalGuardContract || contract || null}
                     onSubmitted={() => {
                       setShowContractRequestFlow(false);
                       loadContract();
@@ -4339,7 +4400,7 @@ export default function OrgPartnerAdmin() {
               partnerName={partnerName}
               orgUserId={orgUserId}
               adminName={adminName}
-              activeContract={contract}
+              activeContract={renewalGuardContract || contract || null}
               onSubmitted={() => {
                 setShowContractRequestFlow(false);
                 loadContract();

@@ -171,7 +171,13 @@ export default function Login() {
     ]);
 
     const role = res.documents.length ? (res.documents[0] as any).role : "user";
-    nav(role === "admin" ? "/admin" : role === "partner_admin" ? "/partner-admin" : "/userhome", { replace: true });
+    nav(
+  role === "admin"            ? "/admin" :
+  role === "partner_admin"    ? "/partner-admin" :
+  role === "partner_org_admin"? "/org-partner-admin" :
+  "/userhome",
+  { replace: true }
+);
   };
 
 const redirectAfterAuth = async (emailForLookup: string) => {

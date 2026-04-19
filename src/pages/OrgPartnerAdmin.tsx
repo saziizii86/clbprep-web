@@ -6,6 +6,7 @@ import {
   databases,
   DATABASE_ID,
   USERS_COLLECTION_ID,
+  functions,
 } from "../appwrite";
 import { loadSessionsFromDB } from "../services/progressService";
 import type { SessionRecord } from "./games/sessionTracker";
@@ -690,7 +691,6 @@ function ContractRequestFlow({
       await createContractRequest(orgUserId, orgName, formData, signerName, signerTitle, signature, signedDate);
       // Notify owner by email without blocking the submit flow
       try {
-        const { functions } = await import("../appwrite");
         void functions.createExecution(
           "69ae201700398cefccd9",
           JSON.stringify({
@@ -1614,11 +1614,10 @@ export default function OrgPartnerAdmin() {
   const startStripeCheckout = useCallback(async (currentContract: OrgContract) => {
     try {
       const currentFd = parseContractFormData(currentContract);
-      const { functions } = await import("../appwrite");
       const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
 
       if (!STRIPE_FUNCTION_ID) {
-        window.alert("VITE_APPWRITE_STRIPE_FUNCTION_ID is missing.");
+        window.alert("Stripe function ID is missing in your production environment.");
         return;
       }
 
@@ -1638,13 +1637,25 @@ export default function OrgPartnerAdmin() {
         "POST"
       );
 
-      const result = JSON.parse(execution.responseBody || "{}");
-      if (result.url) {
-        window.location.href = result.url;
-      } else {
-        window.alert("Could not start checkout: " + (result.error || "Unknown error"));
+      let result: any = {};
+      try {
+        result = JSON.parse(execution.responseBody || "{}");
+      } catch {
+        result = {};
       }
+
+      if (result.url) {
+        window.location.assign(result.url);
+        return;
+      }
+
+      console.error("Stripe checkout did not return a URL.", {
+        responseStatusCode: execution.responseStatusCode,
+        responseBody: execution.responseBody,
+      });
+      window.alert("Could not start checkout. The Stripe function did not return a checkout URL.");
     } catch (e: any) {
+      console.error("Stripe checkout error:", e);
       window.alert("Checkout failed: " + (e?.message || "Please try again."));
     }
   }, [orgUserId, partnerName]);
@@ -2914,10 +2925,10 @@ export default function OrgPartnerAdmin() {
             if (contract && contract.status === "pending_payment") return (
               <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
                 <CheckCircle size={36} style={{ color: S.blue, margin: "0 auto 12px" }} />
-                <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Approved!</div>
+                <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Approved — Awaiting Payment</div>
                 <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6, marginBottom: 20 }}>
                   CLBPrep has reviewed and approved your contract.<br />
-                  Click below to continue to Stripe, complete payment, and activate your seats.
+                  Please review the agreement below, then continue to Stripe to complete payment and activate your seats.
                 </div>
                 <div style={{ marginBottom: 16, padding: "12px 20px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, display: "inline-flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
                   {[

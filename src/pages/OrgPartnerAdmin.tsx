@@ -2993,6 +2993,7 @@ export default function OrgPartnerAdmin() {
 
             if (contract && contract.status === "paid") return (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* ── Active status card ── */}
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
                   <CheckCircle size={36} style={{ color: S.green, margin: "0 auto 12px" }} />
                   <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Active</div>
@@ -3001,12 +3002,50 @@ export default function OrgPartnerAdmin() {
                     Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
                     Signed by <strong>{contract.orgSignerName}</strong> on {contract.orgSignedAt ? new Date(contract.orgSignedAt).toLocaleDateString("en-CA") : "—"}
                   </div>
+                  {/* PDF actions */}
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+                    <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+                      <FolderOpen size={14} /> View PDF
+                    </button>
+                    <button type="button" onClick={() => openContractPdfWindow(true)} style={btnPrimary}>
+                      <Download size={14} /> Download / Print PDF
+                    </button>
+                  </div>
                 </div>
 
-                {renderContractDocumentPanel(contract, {
-                  title: "Active Contract",
-                  note: "You can open the active contract in a PDF-style view or download/save it as PDF anytime.",
-                })}
+                {/* ── New contract / more seats ── */}
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Need more seats or a new term?</div>
+                    <div style={{ fontSize: 12, color: S.textSoft }}>
+                      Request a new quote and sign a new contract to adjust your plan.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContractRequestFlow((prev) => !prev)}
+                    style={showContractRequestFlow ? btnOutline : btnPrimary}
+                  >
+                    {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
+                  </button>
+                </div>
+
+                {showContractRequestFlow && (
+                  <ContractRequestFlow
+                    partnerName={partnerName}
+                    orgUserId={orgUserId}
+                    adminName={adminName}
+                    onSubmitted={() => {
+                      setShowContractRequestFlow(false);
+                      loadContract();
+                    }}
+                    S={S}
+                    titleFont={titleFont}
+                    inputStyle={inputStyle}
+                    btnPrimary={btnPrimary}
+                    btnOutline={btnOutline}
+                  />
+                )}
               </div>
             );
 

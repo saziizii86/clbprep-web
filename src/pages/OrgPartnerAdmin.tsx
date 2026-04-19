@@ -1197,12 +1197,37 @@ export default function OrgPartnerAdmin() {
   }, [partnerName, eligible]);
 
   useEffect(() => {
-    if (!partnerName) return; // wait until auth is confirmed
+    if (!partnerName || !orgUserId) return; // wait until auth is confirmed
     const checkout = searchParams.get("checkout");
-    if (checkout === "cancelled" || checkout === "success") {
-      setPage("contract");
+    if (!checkout) return;
+
+    setPage("contract");
+
+    if (checkout === "success") {
+      const sessionId = searchParams.get("session_id") || "";
+      const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
+
+      (async () => {
+        // Ask the Appwrite function to verify the Stripe session and mark
+        // the contract as paid — this works even if the webhook hasn't fired yet.
+        if (sessionId && STRIPE_FUNCTION_ID) {
+          try {
+            await functions.createExecution(
+              STRIPE_FUNCTION_ID,
+              JSON.stringify({ sessionId }),
+              false,
+              "/verify-org-payment",
+              "POST"
+            );
+          } catch (e) {
+            console.error("verify-org-payment failed:", e);
+          }
+        }
+        // Reload the contract so the UI shows the paid/active state.
+        await loadContract();
+      })();
     }
-  }, [partnerName, searchParams]);
+  }, [partnerName, orgUserId, searchParams, loadContract]);
 
   useEffect(() => {
     if (!partnerName) return;

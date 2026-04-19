@@ -3073,6 +3073,89 @@ export default function OrgPartnerAdmin() {
               </div>
             );
 
+            if (contract && contract.status === "expired") {
+              // Calculate expiry date for display
+              const expiredStart = fd?.effectiveDate || fd?.startDate;
+              const expiredMonths = Number(fd?.months) || 1;
+              let expiryDisplay = "—";
+              if (expiredStart) {
+                const d = new Date(expiredStart);
+                d.setUTCMonth(d.getUTCMonth() + expiredMonths);
+                expiryDisplay = d.toLocaleDateString("en-CA", { timeZone: "UTC" });
+              }
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* ── Expired notice ── */}
+                  <div style={{ background: "#fff", border: `1px solid ${S.red}22`, borderRadius: 16, padding: "28px 24px", textAlign: "center" }}>
+                    <AlertCircle size={36} style={{ color: S.red, margin: "0 auto 12px" }} />
+                    <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>
+                      Contract Expired
+                    </div>
+                    <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.8 }}>
+                      Your contract expired on <strong>{expiryDisplay}</strong>.<br />
+                      All learner access has been deactivated.<br />
+                      Please request a new contract to restore access.
+                    </div>
+                    {/* PDF access still available */}
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+                      <div style={{ display: "none" }}>
+                        <div ref={contractPdfRef}>
+                          <ContractTemplate
+                            data={{ ...parseContractFormData(contract), clbprepSignerName: contract.adminSignerName || "Soheila Azizi", clbprepSignerTitle: contract.adminSignerTitle || "Owner" } as any}
+                            mode="signed"
+                            orgSignerName={contract.orgSignerName}
+                            orgSignerTitle={contract.orgSignerTitle}
+                            orgSignature={contract.orgSignature}
+                            orgSignedAt={contract.orgSignedAt}
+                            adminSignerName={contract.adminSignerName || "Soheila Azizi"}
+                            adminSignerTitle={contract.adminSignerTitle || "Owner"}
+                            adminApprovedAt={contract.adminApprovedAt}
+                          />
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+                        <FolderOpen size={14} /> View Expired Contract
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ── Request new contract ── */}
+                  <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Renew or upgrade your plan</div>
+                      <div style={{ fontSize: 12, color: S.textSoft }}>
+                        Request a new quote to restore learner access. Contact <a href="mailto:support@clbprep.com" style={{ color: S.blue }}>support@clbprep.com</a> if you have questions.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowContractRequestFlow((prev) => !prev)}
+                      style={showContractRequestFlow ? btnOutline : btnPrimary}
+                    >
+                      {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
+                    </button>
+                  </div>
+
+                  {showContractRequestFlow && (
+                    <ContractRequestFlow
+                      partnerName={partnerName}
+                      orgUserId={orgUserId}
+                      adminName={adminName}
+                      onSubmitted={() => {
+                        setShowContractRequestFlow(false);
+                        loadContract();
+                      }}
+                      S={S}
+                      titleFont={titleFont}
+                      inputStyle={inputStyle}
+                      btnPrimary={btnPrimary}
+                      btnOutline={btnOutline}
+                    />
+                  )}
+                </div>
+              );
+            }
+
             if (contract && contract.status === "cancelled") return (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>

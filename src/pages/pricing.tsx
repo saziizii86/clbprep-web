@@ -1,4 +1,4 @@
-const PRICING_ACTIVE = false; // 👈 Set to true when Stripe is ready
+const PRICING_ACTIVE = true; // 👈 Set to true when Stripe is ready
 
 import React, { useEffect, useState } from "react";
 import {

@@ -28,7 +28,7 @@ export default function PrivacyPolicy({ onBack }: { onBack: () => void }) {
       <main className="mx-auto max-w-4xl px-4 py-12">
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm md:p-12">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Privacy Policy</h1>
-          <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: March 2026</p>
+          <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: April 2026</p>
           <p className="mt-1 text-sm text-slate-500">CLBPrep, operated by Azizi Online Learning Services — Halifax, Nova Scotia, Canada</p>
 
           <hr className="my-6 border-slate-100" />
@@ -141,11 +141,11 @@ export default function PrivacyPolicy({ onBack }: { onBack: () => void }) {
             </p>
           </Section>
 
-          <Section title="7. Your Rights — PIPEDA & Nova Scotia PIPA">
+          <Section title="7. Your Rights Under PIPEDA">
             <p>
-              As a resident of Nova Scotia or anywhere in Canada, your personal information is protected
-              under Canada's federal privacy law (PIPEDA) as well as applicable provincial standards.
-              You have the right to:
+              Your personal information is protected under Canada's federal privacy law, the
+              Personal Information Protection and Electronic Documents Act (PIPEDA), and other
+              applicable laws. You may have the right to:
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Access the personal information we hold about you</li>

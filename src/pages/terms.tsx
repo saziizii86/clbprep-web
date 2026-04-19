@@ -28,7 +28,7 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
       <main className="mx-auto max-w-4xl px-4 py-12">
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm md:p-12">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Terms of Service</h1>
-          <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: March 2026</p>
+          <p className="mt-1 text-sm text-slate-500">Effective Date: January 1, 2025 — Last Updated: April 2026</p>
           <p className="mt-1 text-sm text-slate-500">CLBPrep, operated by Azizi Online Learning Services — Halifax, Nova Scotia, Canada</p>
 
 
@@ -88,7 +88,7 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
 
           <Section title="6. No Refund Policy">
             <p>
-              <strong>All purchases on CLBPrep are final and non-refundable.</strong> By completing
+              <strong>Except where required by applicable law, all purchases on CLBPrep are final and non-refundable.</strong> By completing
               your purchase, you acknowledge and agree that no refunds, credits, or exchanges will be
               issued under any circumstances, including but not limited to:
             </p>
@@ -111,7 +111,7 @@ export default function TermsOfService({ onBack }: { onBack: () => void }) {
               By proceeding to checkout, you confirm that you have read and understood this no-refund policy.
             </p>
 			<p className="mt-3">
-  These Terms do not remove any legal rights that customers have under the law.
+  Nothing in these Terms limits any non-waivable rights you may have under applicable consumer protection law.
 </p>
           </Section>
 

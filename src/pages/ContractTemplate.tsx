@@ -90,13 +90,10 @@ export default function ContractTemplate({
     : "___________";
   const startDate = data.startDate || "___________";
   const term = data.initialTerm || "Monthly";
-  const billing = data.billingMethod || "Stripe invoice";
-  const autoRenew = Boolean(data.autoRenew);
+  const billing = data.billingMethod || "Online payment via Stripe";
   const notes = data.specialNotes;
 
-  const renewalText = autoRenew
-    ? "Yes — subscription renews automatically unless cancelled in accordance with this Agreement"
-    : "No — manual renewal only. The subscription expires at the end of the paid term unless renewed.";
+  const renewalText = "No — manual renewal only. The subscription expires at the end of the paid term unless renewed.";
 
   return (
     <div
@@ -281,29 +278,19 @@ export default function ContractTemplate({
 
       <Section number="3" title="Payment Terms">
         <Clause>
-          CLBPrep will issue an invoice or payment link at the beginning of each billing cycle or agreed term.
-        </Clause>
-        <Clause>
-          Payment is due within <strong>15 days</strong> of the invoice date unless otherwise stated in writing.
+          All fees are payable in advance through the CLBPrep secure online checkout, processed via Stripe. Access to
+          the Platform is granted upon confirmation of successful payment.
         </Clause>
 
-        {autoRenew ? (
-          <Clause>
-            Because the Organization has selected auto-renewal, the Organization authorizes recurring billing through the
-            agreed payment method, subject to this Agreement and any separate written billing approval.
-          </Clause>
-        ) : (
-          <Clause>
-            This Agreement does <strong>not</strong> authorize automatic recurring charges. If the Organization wishes to
-            continue service after the current paid term, renewal may be completed by payment of a renewal invoice,
-            acceptance of a renewal quote, or another written confirmation accepted by CLBPrep.
-          </Clause>
-        )}
+        <Clause>
+          This Agreement does <strong>not</strong> authorize automatic recurring charges. If the Organization wishes to
+          continue service after the current paid term, a new payment must be completed through the CLBPrep checkout
+          before the next term begins.
+        </Clause>
 
         <Clause>
-          For any renewal or new term, payment must be received before the next term begins, unless otherwise agreed in
-          writing. If payment for a renewal or new term is not received, access to the Platform will remain active only
-          until the end of the current paid term and will then end automatically on the contract expiry date.
+          If payment for a renewal or new term is not received before the current paid term ends, access to the Platform
+          will remain active only until the expiry date of the current paid term and will then end automatically.
         </Clause>
       </Section>
 
@@ -313,24 +300,13 @@ export default function ContractTemplate({
           above</strong>.
         </Clause>
 
-        {autoRenew ? (
-          <Clause>
-            At the end of the current term, this Agreement will automatically renew for successive renewal terms of the same
-            length unless either party gives written notice of non-renewal or cancellation in accordance with this
-            Agreement.
-          </Clause>
-        ) : (
-          <Clause>
-            At the end of the paid term, this Agreement will expire automatically unless it is manually renewed in
-            accordance with Section 3.
-          </Clause>
-        )}
-
-        {!autoRenew && (
-          <Clause>
-            No notice is required for either party to allow the Agreement to expire at the end of the current paid term.
-          </Clause>
-        )}
+        <Clause>
+          At the end of the paid term, this Agreement will expire automatically unless it is manually renewed in
+          accordance with Section 3.
+        </Clause>
+        <Clause>
+          No notice is required for either party to allow the Agreement to expire at the end of the current paid term.
+        </Clause>
 
         <Clause>
           If the Organization chooses to stop using the Platform before the end of a paid term, no refund will be provided

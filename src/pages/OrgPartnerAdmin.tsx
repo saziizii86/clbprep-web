@@ -792,10 +792,10 @@ const QUOTE_PLANS = [
   { key: "100", label: "100 seats", price: 999 },
 ];
 const QUOTE_MONTHS = [
-  { value: 1,  label: "1 month"  },
-  { value: 3,  label: "3 months", discount: "Save 5%" },
-  { value: 6,  label: "6 months", discount: "Save 8%" },
-  { value: 12, label: "12 months",discount: "Save 12%" },
+  { value: 1,  label: "1 Month (30 Days)"  },
+  { value: 3,  label: "3 Months (90 Days)", discount: "Save 5%" },
+  { value: 6,  label: "6 Months (180 Days)", discount: "Save 8%" },
+  { value: 12, label: "12 Months (360 Days)",discount: "Save 12%" },
 ];
 const DISCOUNT: Record<number, number> = { 1: 0, 3: 5, 6: 8, 12: 12 };
 
@@ -812,6 +812,24 @@ function calcMonthlyPrice(seats: number): number {
   return Math.round(pricePerSeat(seats) * seats);
 }
 
+function formatPresetDurationLabel(months: number): string {
+  const safeMonths = Math.max(1, Number(months) || 1);
+  const safeDays = safeMonths * 30;
+  return `${safeMonths} Month${safeMonths > 1 ? "s" : ""} (${safeDays} Day${safeDays > 1 ? "s" : ""})`;
+}
+
+function formatStoredTermLabel(fd: any): string {
+  if (fd?.initialTerm) return String(fd.initialTerm);
+  if (Number.isFinite(Number(fd?.customDays)) && Number(fd.customDays) > 0) {
+    const days = Number(fd.customDays);
+    return `${days} Day${days > 1 ? "s" : ""}`;
+  }
+  if (Number.isFinite(Number(fd?.serviceDays)) && Number(fd.serviceDays) > 0) {
+    const days = Number(fd.serviceDays);
+    return `${days} Day${days > 1 ? "s" : ""}`;
+  }
+  return formatPresetDurationLabel(Number(fd?.months) || 1);
+}
 
 function ContractRequestFlow({
   partnerName,
@@ -890,10 +908,8 @@ function ContractRequestFlow({
   const total = Math.round((monthlyAfterDiscount * selectedDurationDays) / 30);
   const selectedDurationLabel =
     durationMode === "custom"
-      ? `${selectedDurationDays} days`
-      : months === 1
-        ? "1 month"
-        : `${months} months`;
+      ? `${selectedDurationDays} Day${selectedDurationDays > 1 ? "s" : ""}`
+      : formatPresetDurationLabel(months);
 
   const todayDateValue = React.useMemo(
     () => formatContractDate(getTodayUtcDate().toISOString()),
@@ -1448,7 +1464,7 @@ function ContractRequestFlow({
                 <span style={{ fontSize: 12, color: S.textSoft }}>
                   {typeof customDays === "number" && customDays >= MIN_CUSTOM_DAYS ? (
                     <>
-                      ≈ {(customDays / 30).toFixed(1)} months ·
+                      ≈ {(customDays / 30).toFixed(1)} months ({customDays} days) ·
                       <span style={{ color: "#16a34a", fontWeight: 700 }}> CAD ${Math.round((calcMonthlyPrice(effectiveSeats) * (1 - getCustomDaysDiscount(customDays) / 100) * customDays) / 30)} total</span>
                     </>
                   ) : (
@@ -3959,7 +3975,7 @@ export default function OrgPartnerAdmin() {
                 <div style={{ marginBottom: 16, padding: "12px 20px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, display: "inline-flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
                   {[
                     ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/month`],
-                    ["Term", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
+                    ["Term", formatStoredTermLabel(fd)],
                     ["Start", fd?.startDate || "—"],
                     ["Total", `CAD $${fd?.totalPrice}`],
                   ].map(([l, v]) => (
@@ -4182,7 +4198,7 @@ export default function OrgPartnerAdmin() {
                                   {isCurrentServiceContract && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
                                 </div>
                                 <div style={{ fontSize: 11, color: S.textSoft }}>
-                                  {cfd?.initialTerm || `${cfd?.months} month`} · Contract start: {formatContractDate(cfd?.startDate)} · Effective: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
+                                  {formatStoredTermLabel(cfd)} · Contract start: {formatContractDate(cfd?.startDate)} · Effective: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
                                   {cTiming.carryoverDays > 0 && ` · +${cTiming.carryoverDays} carryover day${cTiming.carryoverDays !== 1 ? "s" : ""}`}
                                 </div>
                               </div>
@@ -4349,7 +4365,7 @@ export default function OrgPartnerAdmin() {
                       {[
                         ["Organization", fd?.organizationName],
                         ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/mo`],
-                        ["Duration", fd?.initialTerm || `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
+                        ["Duration", formatStoredTermLabel(fd)],
                         ["Total", `CAD $${fd?.totalPrice}`],
                         ["Start Date", fd?.startDate],
                         ["Submitted", new Date(contract.createdAt).toLocaleDateString("en-CA")],

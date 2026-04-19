@@ -625,10 +625,12 @@ function ContractRequestFlow({
   const [step, setStep] = React.useState<"quote" | "register">("quote");
 
   // Quote state
-  const [plan,        setPlan]        = React.useState("20");
-  const [customSeats, setCustomSeats] = React.useState<number | "">(20);
-  const [months,      setMonths]      = React.useState(1);
-  const [seatsErr,    setSeatsErr]    = React.useState("");
+  const [plan,           setPlan]           = React.useState("20");
+  const [customSeats,    setCustomSeats]    = React.useState<number | "">(20);
+  const [months,         setMonths]         = React.useState(1);
+  const [customDaysMode, setCustomDaysMode] = React.useState(false);
+  const [customDays,     setCustomDays]     = React.useState<number | "">(30);
+  const [seatsErr,       setSeatsErr]       = React.useState("");
 
   // Effective seat count — custom input overrides preset buttons
   const effectiveSeats = typeof customSeats === "number" && customSeats >= 15 ? customSeats : 25;
@@ -656,10 +658,14 @@ function ContractRequestFlow({
   const [submitting,   setSubmitting]   = React.useState(false);
   const [submitErr,    setSubmitErr]    = React.useState("");
 
-  const disc       = DISCOUNT[months] || 0;
+  const disc        = customDaysMode ? 0 : (DISCOUNT[months] || 0);
   const baseMonthly = calcMonthlyPrice(effectiveSeats);
   const discounted  = Math.round(baseMonthly * (1 - disc / 100));
-  const total       = discounted * months;
+  const effectiveDays = customDaysMode ? (typeof customDays === "number" && customDays >= 1 ? customDays : 30) : months * 30;
+  const dailyRate   = discounted / 30;
+  const total       = customDaysMode
+    ? Math.round(dailyRate * effectiveDays)
+    : discounted * months;
 
   const handleSubmit = async () => {
     if (!agreed) { setSubmitErr("Please read and agree to the terms."); return; }
@@ -670,10 +676,12 @@ function ContractRequestFlow({
     setSubmitting(true);
     setSubmitErr("");
     try {
+      const termMonths = customDaysMode ? Math.ceil(effectiveDays / 30) : months;
+      const termLabel  = customDaysMode ? `${effectiveDays} days` : (months === 1 ? "Monthly" : `${months} months`);
       const formData: OrgContractRequestData = {
         selectedPlan: planKey,
         selectedPlanPrice: discounted,
-        months,
+        months: termMonths,
         totalPrice: total,
         organizationName: orgName,
         organizationAddress: orgAddress,
@@ -684,12 +692,13 @@ function ContractRequestFlow({
         primaryAdminEmail: adminEmail || billingEmail,
         startDate,
         effectiveDate: effectiveDate || startDate,
-        initialTerm: months === 1 ? "Monthly" : `${months} months`,
+        initialTerm: termLabel,
         autoRenew,
         billingMethod: billing,
         specialNotes: notes,
         orgSignedAt: signedDate,
-      } as OrgContractRequestData & { orgSignedAt: string };
+        ...(customDaysMode ? { customDays: effectiveDays } : {}),
+      } as OrgContractRequestData & { orgSignedAt: string; customDays?: number };
       await createContractRequest(orgUserId, orgName, formData, signerName, signerTitle, signature, signedDate);
       // Notify owner by email without blocking the submit flow
       try {
@@ -834,10 +843,10 @@ function ContractRequestFlow({
         </div>
         <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
           {QUOTE_MONTHS.map(m => (
-            <button key={m.value} onClick={() => setMonths(m.value)}
+            <button key={m.value} onClick={() => { setMonths(m.value); setCustomDaysMode(false); }}
               style={{
-                border: `2px solid ${months === m.value ? "#6366f1" : S.border}`,
-                borderRadius: 14, padding: "12px 16px", background: months === m.value ? "#eef2ff" : "#fff",
+                border: `2px solid ${!customDaysMode && months === m.value ? "#6366f1" : S.border}`,
+                borderRadius: 14, padding: "12px 16px", background: !customDaysMode && months === m.value ? "#eef2ff" : "#fff",
                 cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
               }}
             >
@@ -847,6 +856,35 @@ function ContractRequestFlow({
               )}
             </button>
           ))}
+          {/* Custom days button */}
+          <button
+            onClick={() => setCustomDaysMode(true)}
+            style={{
+              border: `2px solid ${customDaysMode ? "#6366f1" : S.border}`,
+              borderRadius: 14, padding: "12px 16px", background: customDaysMode ? "#eef2ff" : "#fff",
+              cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
+              gridColumn: "1 / -1",
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>Custom days</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 999 }}>Flexible</div>
+          </button>
+          {customDaysMode && (
+            <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#f8fafc", borderRadius: 12, border: `1px solid ${S.border}` }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: S.text, whiteSpace: "nowrap" }}>Number of days:</label>
+              <input
+                type="number"
+                min={1}
+                max={730}
+                value={customDays}
+                onChange={e => setCustomDays(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value) || 1))}
+                style={{ ...inputStyle, width: 90, textAlign: "center", fontWeight: 700 }}
+              />
+              <span style={{ fontSize: 12, color: S.textSoft }}>
+                ≈ {typeof customDays === "number" ? (customDays / 30).toFixed(1) : "—"} months · CAD ${typeof customDays === "number" ? Math.round(discounted / 30 * customDays) : 0} total
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -867,14 +905,14 @@ function ContractRequestFlow({
           </div>
           <div>
             <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
-            <div style={{ fontWeight: 700, color: S.text }}>{months} month{months > 1 ? "s" : ""}</div>
+            <div style={{ fontWeight: 700, color: S.text }}>{customDaysMode ? `${effectiveDays} days` : `${months} month${months > 1 ? "s" : ""}`}</div>
           </div>
         </div>
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
             <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
-            <div style={{ fontSize: 11, color: "#6366f1" }}>for {months} month{months > 1 ? "s" : ""} · {effectiveSeats} seats</div>
+            <div style={{ fontSize: 11, color: "#6366f1" }}>for {customDaysMode ? `${effectiveDays} days` : `${months} month${months > 1 ? "s" : ""}`} · {effectiveSeats} seats</div>
           </div>
           <button
             onClick={() => {
@@ -3083,7 +3121,10 @@ export default function OrgPartnerAdmin() {
                       const d = new Date(start);
                       d.setUTCMonth(d.getUTCMonth() + months);
                       const expiry = d.toLocaleDateString("en-CA", { timeZone: "UTC" });
-                      return <>Expires <strong>{expiry}</strong> ({months} month{months > 1 ? "s" : ""})</>;
+                      const today = new Date();
+                      today.setUTCHours(0, 0, 0, 0);
+                      const daysLeft = Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86400000));
+                      return <>Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)</>;
                     })()}
                   </div>
                   {/* PDF actions */}

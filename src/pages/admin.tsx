@@ -1,5 +1,14 @@
-import { account, storage, BUCKET_ID, databases, DATABASE_ID, USERS_COLLECTION_ID } from "../appwrite";
+import { account, storage, BUCKET_ID, databases, DATABASE_ID, USERS_COLLECTION_ID, functions } from "../appwrite";
 import { Query, ID } from "appwrite";
+import OrgContractPage from "./OrgContractPage";
+import {
+  getAllContracts,
+  approveContract,
+  cancelContract,
+  contractStatusLabel,
+  contractStatusColor,
+} from "../services/contractsService";
+import type { OrgContract } from "../services/contractsService";
 import { 
   getAPISettings, 
   saveAPISettings as saveAPISettingsToDB, 
@@ -29,6 +38,8 @@ import {
 } from "../services/materialsService";
 
 // ============== IndexedDB Storage (supports large files) ==============
+// Reuses the same Resend email function as feedback.tsx — no new function needed
+const CONTRACT_EMAIL_FUNCTION_ID = "69ae201700398cefccd9";
 const DB_NAME = 'celpip_admin_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'materials';
@@ -368,6 +379,14 @@ const [students, setStudents] = useState<any[]>([]);
 const [studentsLoading, setStudentsLoading] = useState(false);
 const [studentSearchQuery, setStudentSearchQuery] = useState("");
 const [studentSection, setStudentSection] = useState<"learners" | "partner_admins" | "org_partners" | "all">("learners");
+const [showSendFormsModal, setShowSendFormsModal] = useState(false);
+const [sendFormsTarget, setSendFormsTarget] = useState<any>(null);
+const [sendFormsEmailMode, setSendFormsEmailMode] = useState<"registered" | "custom">("registered");
+const [sendFormsCustomEmail, setSendFormsCustomEmail] = useState("");
+const [isSendingForms, setIsSendingForms] = useState(false);
+const [sendFormsError, setSendFormsError] = useState("");
+const [sendFormsSuccess, setSendFormsSuccess] = useState(false);
+const [contractsLoading, setContractsLoading] = useState(false);
 
 type StudentPlan = "basic" | "weekly" | "monthly" | "bimonthly" | "quarterly";
 type TransactionStatus = "inactive" | "active" | "cancelled" | "expired" | "refunded";
@@ -1140,6 +1159,90 @@ const resetUserBuilderHistory = async (student: any) => {
   }
 };
   
+const handleSendForms = async () => {
+  const targetEmail =
+    sendFormsEmailMode === "registered"
+      ? sendFormsTarget?.email
+      : sendFormsCustomEmail.trim();
+
+  if (!targetEmail) return;
+
+  const orgName = sendFormsTarget?.partnerName || sendFormsTarget?.name || "your organization";
+  const subject = sendFormsTarget?._formSubject || `CLBPrep Organization Forms – ${orgName}`;
+  const body = sendFormsTarget?._formBody || [
+    `Hello,`,
+    ``,
+    `Please find the following CLBPrep organization forms for ${orgName}:`,
+    ``,
+    `1. Organization Order Form`,
+    `   https://clbprep.com/org-order-form`,
+    ``,
+    `2. Service Agreement`,
+    `   https://clbprep.com/org-service-agreement`,
+    ``,
+    `Please complete and return both forms at your earliest convenience.`,
+    `If you have any questions, feel free to reply to this email.`,
+    ``,
+    `Best regards,`,
+    `CLBPrep Team`,
+    `support@clbprep.com`,
+  ].join("\n");
+
+  setIsSendingForms(true);
+  setSendFormsError("");
+
+  try {
+    const execution = await functions.createExecution(
+      CONTRACT_EMAIL_FUNCTION_ID,
+      JSON.stringify({
+        to:           targetEmail,
+        name:         "CLBPrep Admin",
+        email:        "support@clbprep.com",
+        feedbackType: subject,
+        message:      body,
+        attachments:  "None",
+      }),
+      false,
+    );
+
+    if (execution.status === "completed") {
+      const response = JSON.parse(execution.responseBody || "{}");
+      if (response.ok) {
+        setSendFormsSuccess(true);
+        setTimeout(() => {
+          setShowSendFormsModal(false);
+          setSendFormsSuccess(false);
+          setSendFormsError("");
+          setSendFormsCustomEmail("");
+          setSendFormsEmailMode("registered");
+          setContractsFormType(false);
+        }, 2000);
+      } else {
+        throw new Error(response.error || "Unknown error from function");
+      }
+    } else {
+      throw new Error("Function did not complete: " + execution.status);
+    }
+  } catch (err: any) {
+    console.error("Contract email error:", err);
+    setSendFormsError("Failed to send. Please try again or email support@clbprep.com directly.");
+  } finally {
+    setIsSendingForms(false);
+  }
+};
+
+const loadAllContracts = async () => {
+  setContractsLoading(true);
+  try {
+    const docs = await getAllContracts();
+    setAllContracts(docs);
+  } catch (e) {
+    console.error("Failed to load contracts:", e);
+  } finally {
+    setContractsLoading(false);
+  }
+};
+
 const dashboardStats = [
   {
     label: "Total Students",
@@ -8208,6 +8311,17 @@ onClick={() => {
           <span>Students</span>
         </button>
 
+        {/* Contracts */}
+        <button
+          onClick={() => { setActiveTab('contracts'); setActiveSubTab(null); closeSidebar(); }}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+            activeTab === 'contracts' ? 'bg-blue-600' : 'text-gray-300 hover:bg-gray-800'
+          }`}
+        >
+          <FileCheck className="w-5 h-5" />
+          <span>Contracts</span>
+        </button>
+
         {/* Analytics */}
         <button
           onClick={() => { setActiveTab('analytics'); setActiveSubTab(null); closeSidebar(); }}
@@ -9517,6 +9631,9 @@ const providerModels = {
     </div>
   </div>
   
+          ) : activeTab === 'contracts' ? (
+            <OrgContractPage onBack={() => setActiveTab('dashboard')} />
+
           ) : activeTab === 'settings' ? (
             <div className="space-y-6">
               <div className="bg-white rounded-xl p-6 border">
@@ -9621,6 +9738,131 @@ const providerModels = {
 {showUploadModal && <UploadModal key={editingMaterial?.id || 'new'} />}
       {showViewModal && <ViewModal />}
       {showPreviewPage && <PreviewPage />}
+
+      {showSendFormsModal && sendFormsTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Send Forms</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {sendFormsTarget.partnerName || sendFormsTarget.name}
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowSendFormsModal(false); setSendFormsError(""); }}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                Choose where to send the <strong>Order Form</strong> and <strong>Service Agreement</strong>:
+              </p>
+
+              {/* Option 1 — Registered email */}
+              <label
+                className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  sendFormsEmailMode === "registered"
+                    ? "border-violet-500 bg-violet-50"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="sendFormsEmail"
+                  checked={sendFormsEmailMode === "registered"}
+                  onChange={() => setSendFormsEmailMode("registered")}
+                  className="mt-0.5 accent-violet-600"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Registered admin email</p>
+                  <p className="text-sm text-violet-700 font-medium mt-0.5">
+                    {sendFormsTarget.email || "—"}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">The email this account was created with</p>
+                </div>
+              </label>
+
+              {/* Option 2 — Custom email */}
+              <label
+                className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  sendFormsEmailMode === "custom"
+                    ? "border-violet-500 bg-violet-50"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="sendFormsEmail"
+                  checked={sendFormsEmailMode === "custom"}
+                  onChange={() => setSendFormsEmailMode("custom")}
+                  className="mt-0.5 accent-violet-600"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-800">Organization's preferred email</p>
+                  <p className="text-xs text-gray-400 mt-0.5 mb-2">
+                    A different email the organization wants the forms sent to
+                  </p>
+                  {sendFormsEmailMode === "custom" && (
+                    <input
+                      type="email"
+                      value={sendFormsCustomEmail}
+                      onChange={(e) => setSendFormsCustomEmail(e.target.value)}
+                      placeholder="e.g. billing@ymca.ca"
+                      autoFocus
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400"
+                    />
+                  )}
+                </div>
+              </label>
+
+              {sendFormsSuccess && (
+                <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm font-medium">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  Email sent successfully!
+                </div>
+              )}
+
+              {sendFormsError && (
+                <div className="flex items-start gap-2 text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{sendFormsError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button
+                onClick={() => { setShowSendFormsModal(false); setSendFormsError(""); }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendForms}
+                disabled={
+                  isSendingForms ||
+                  sendFormsSuccess ||
+                  (sendFormsEmailMode === "custom" && !sendFormsCustomEmail.trim())
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {isSendingForms ? (
+                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Sending…</>
+                ) : (
+                  <><Send className="w-4 h-4" /> Send Forms</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showCreateUserModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md">

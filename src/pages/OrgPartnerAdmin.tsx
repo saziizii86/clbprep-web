@@ -10,8 +10,18 @@ import {
 import { loadSessionsFromDB } from "../services/progressService";
 import type { SessionRecord } from "./games/sessionTracker";
 import {
+  getContractByOrgId,
+  createContractRequest,
+  parseContractFormData,
+  contractStatusLabel,
+  contractStatusColor,
+} from "../services/contractsService";
+import type { OrgContract, OrgContractRequestData } from "../services/contractsService";
+import ContractTemplate from "./ContractTemplate";
+import {
   AlertCircle,
   Building2,
+  CheckCircle,
   ChevronLeft,
   Download,
   FolderOpen,
@@ -27,6 +37,7 @@ import {
   Upload,
   Users,
   UserPlus,
+  FileCheck,
   FileText,
   X,
 } from "lucide-react";
@@ -36,7 +47,7 @@ const PARTNER_ELIGIBILITY_COLLECTION_ID =
 const PARTNER_GROUPS_COLLECTION_ID =
   (import.meta.env.VITE_PARTNER_GROUPS_COLLECTION_ID || "partner_groups").trim();
 
-type Page = "dashboard" | "groups" | "learners" | "eligible";
+type Page = "dashboard" | "groups" | "learners" | "eligible" | "contract";
 type AddMode = "single" | "bulk";
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 type Meridiem = "AM" | "PM";
@@ -196,6 +207,17 @@ const labelStyle: React.CSSProperties = {
 };
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+function formatContractDate(value?: string): string {
+  if (!value) return "—";
+  const trimmed = String(value).trim();
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const t = new Date(trimmed).getTime();
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleDateString("en-CA", { timeZone: "UTC" });
+}
+
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const safeNumber = (value: unknown, fallback = 0) => {
@@ -558,6 +580,466 @@ function LearnerRangeToggle({ value, onChange }: { value: Range; onChange: (r: R
   return (<div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-5">{(["biweekly", "monthly", "yearly"] as Range[]).map((r) => (<button key={r} onClick={() => onChange(r)} className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${value === r ? "bg-white shadow text-gray-900" : "text-gray-400 hover:text-gray-600"}`}>{r === "biweekly" ? "Bi-weekly" : r === "monthly" ? "Monthly" : "Yearly"}</button>))}</div>);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ContractRequestFlow — Quote → Register → Submit
+   Rendered inside OrgPartnerAdmin when no contract exists yet
+══════════════════════════════════════════════════════════════ */
+const QUOTE_PLANS = [
+  { key: "20",  label: "20 seats",  price: 240 },
+  { key: "50",  label: "50 seats",  price: 525 },
+  { key: "75",  label: "75 seats",  price: 750 },
+  { key: "100", label: "100 seats", price: 999 },
+];
+const QUOTE_MONTHS = [
+  { value: 1,  label: "1 month"  },
+  { value: 3,  label: "3 months", discount: "Save 5%" },
+  { value: 6,  label: "6 months", discount: "Save 8%" },
+  { value: 12, label: "12 months",discount: "Save 12%" },
+];
+const DISCOUNT: Record<number, number> = { 1: 0, 3: 5, 6: 8, 12: 12 };
+
+// Price per seat per month based on volume
+// 15–49: $12.00 | 50–74: $10.50 | 75–99: $10.00 | 100+: $9.99
+function pricePerSeat(seats: number): number {
+  if (seats >= 100) return 9.99;
+  if (seats >= 75)  return 10.00;
+  if (seats >= 50)  return 10.50;
+  return 12.00; // 15–49 seats
+}
+
+function calcMonthlyPrice(seats: number): number {
+  return Math.round(pricePerSeat(seats) * seats);
+}
+
+function ContractRequestFlow({
+  partnerName, orgUserId, adminName, onSubmitted,
+  S, titleFont, inputStyle, btnPrimary, btnOutline,
+}: {
+  partnerName: string; orgUserId: string; adminName: string;
+  onSubmitted: () => void;
+  S: any; titleFont: string; inputStyle: any; btnPrimary: any; btnOutline: any;
+}) {
+  const [step, setStep] = React.useState<"quote" | "register">("quote");
+
+  // Quote state
+  const [plan,        setPlan]        = React.useState("20");
+  const [customSeats, setCustomSeats] = React.useState<number | "">(20);
+  const [months,      setMonths]      = React.useState(1);
+  const [seatsErr,    setSeatsErr]    = React.useState("");
+
+  // Effective seat count — custom input overrides preset buttons
+  const effectiveSeats = typeof customSeats === "number" && customSeats >= 15 ? customSeats : 25;
+  // Snap plan key for downstream use
+  const planKey = String(effectiveSeats);
+
+  // Register state
+  const [orgName,      setOrgName]      = React.useState(partnerName || "");
+  const [orgAddress,   setOrgAddress]   = React.useState("");
+  const [billingName,  setBillingName]  = React.useState(adminName || "");
+  const [billingEmail, setBillingEmail] = React.useState("");
+  const [invoiceEmail, setInvoiceEmail] = React.useState("");
+  const [adminEmail,   setAdminEmail]   = React.useState("");
+  const [startDate,    setStartDate]    = React.useState("");
+  const [effectiveDate,setEffectiveDate]= React.useState("");
+  const [term,         setTerm]         = React.useState("Monthly");
+  const [autoRenew,    setAutoRenew]    = React.useState(false);
+  const [billing,      setBilling]      = React.useState("Stripe invoice");
+  const [notes,        setNotes]        = React.useState("");
+  const [agreed,       setAgreed]       = React.useState(false);
+  const [signerName,   setSignerName]   = React.useState(adminName || "");
+  const [signerTitle,  setSignerTitle]  = React.useState("");
+  const [signature,    setSignature]    = React.useState("");
+  const [signedDate,   setSignedDate]   = React.useState("");
+  const [submitting,   setSubmitting]   = React.useState(false);
+  const [submitErr,    setSubmitErr]    = React.useState("");
+
+  const disc       = DISCOUNT[months] || 0;
+  const baseMonthly = calcMonthlyPrice(effectiveSeats);
+  const discounted  = Math.round(baseMonthly * (1 - disc / 100));
+  const total       = discounted * months;
+
+  const handleSubmit = async () => {
+    if (!agreed) { setSubmitErr("Please read and agree to the terms."); return; }
+    if (!signerName.trim() || !signerTitle.trim() || !signature.trim() || !signedDate) {
+      setSubmitErr("Please fill in all signature fields."); return;
+    }
+    if (!startDate) { setSubmitErr("Please set a start date."); return; }
+    setSubmitting(true);
+    setSubmitErr("");
+    try {
+      const formData: OrgContractRequestData = {
+        selectedPlan: planKey,
+        selectedPlanPrice: discounted,
+        months,
+        totalPrice: total,
+        organizationName: orgName,
+        organizationAddress: orgAddress,
+        billingContactName: billingName,
+        billingEmail,
+        invoiceEmail: invoiceEmail || billingEmail,
+        primaryAdminName: signerName,
+        primaryAdminEmail: adminEmail || billingEmail,
+        startDate,
+        effectiveDate: effectiveDate || startDate,
+        initialTerm: months === 1 ? "Monthly" : `${months} months`,
+        autoRenew,
+        billingMethod: billing,
+        specialNotes: notes,
+        orgSignedAt: signedDate,
+      } as OrgContractRequestData & { orgSignedAt: string };
+      await createContractRequest(orgUserId, orgName, formData, signerName, signerTitle, signature, signedDate);
+      // Notify owner by email without blocking the submit flow
+      try {
+        const { functions } = await import("../appwrite");
+        void functions.createExecution(
+          "69ae201700398cefccd9",
+          JSON.stringify({
+            to: "support@clbprep.com",
+            name: "Soheila Azizi",
+            email: "support@clbprep.com",
+            feedbackType: `New Contract Request — ${orgName}`,
+            message: [
+              `Hello Soheila,`,
+              ``,
+              `A new contract request has been submitted by ${orgName}.`,
+              ``,
+              `Details:`,
+              `  Organization: ${orgName}`,
+              `  Plan: ${plan} seats — CAD $${discounted}/month`,
+              `  Duration: ${months} month${months > 1 ? "s" : ""}`,
+              `  Total: CAD $${total}`,
+              `  Start Date: ${startDate}`,
+              `  Signed by: ${signerName} (${signerTitle})`,
+              ``,
+              `Please log into your admin dashboard and review the contract under the Contracts tab.`,
+              ``,
+              `CLBPrep System`,
+            ].join("\n"),
+            attachments: "None",
+          }),
+          true
+        ).catch((e) => console.warn("Email failed:", e));
+      } catch (e) {
+        console.warn("Email setup failed:", e);
+      }
+
+      await Promise.resolve(onSubmitted());
+    } catch (e: any) {
+      setSubmitErr(e?.message || "Submission failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ── Step 1: Quote ── */
+  if (step === "quote") return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ background: "linear-gradient(135deg,#1e3a5f,#12284b)", borderRadius: 16, padding: "16px 22px", color: "white", display: "flex", alignItems: "center", gap: 14 }}>
+        <FileCheck size={22} style={{ flexShrink: 0, opacity: 0.8 }} />
+        <div>
+          <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, marginBottom: 3 }}>Request a Quote</div>
+          <div style={{ fontSize: 11, opacity: .8, lineHeight: 1.6 }}>Select your seat plan and contract duration to see your pricing. If you're happy with the quote, you can proceed to register your contract.</div>
+        </div>
+      </div>
+
+      {/* Plan selector */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>1. Select Seats</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Choose a common plan or enter any number (minimum 15)</div>
+        </div>
+        <div style={{ padding: "16px 20px" }}>
+          {/* Quick-select preset buttons */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
+            {QUOTE_PLANS.map(p => {
+              const active = effectiveSeats === Number(p.key);
+              return (
+                <button key={p.key}
+                  onClick={() => { setCustomSeats(Number(p.key)); setSeatsErr(""); }}
+                  style={{
+                    border: `2px solid ${active ? "#6366f1" : S.border}`,
+                    borderRadius: 12, padding: "10px 8px", background: active ? "#eef2ff" : "#fff",
+                    cursor: "pointer", textAlign: "center", transition: "all .15s",
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: 14, color: active ? "#4338ca" : S.text }}>{p.key}</div>
+                  <div style={{ fontSize: 10, color: S.textSoft, marginTop: 1 }}>seats</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#4338ca" : S.text, marginTop: 4 }}>
+                    ${p.price}<span style={{ fontSize: 10, fontWeight: 400, color: S.textSoft }}>/mo</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom seat input */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#f8fafc", borderRadius: 12, border: `1px solid ${seatsErr ? "#fca5a5" : S.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.text, flexShrink: 0 }}>Custom seats:</div>
+            <input
+              type="number"
+              min={15}
+              max={10000}
+              value={customSeats}
+              onChange={e => {
+                const val = e.target.value === "" ? "" : parseInt(e.target.value);
+                setCustomSeats(val as number | "");
+                if (typeof val === "number" && val < 15) {
+                  setSeatsErr("Minimum 15 seats required");
+                } else {
+                  setSeatsErr("");
+                }
+              }}
+              placeholder="e.g. 75"
+              style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 800, fontSize: 16 }}
+            />
+            <div style={{ fontSize: 12, color: S.textSoft }}>
+              {typeof customSeats === "number" && customSeats >= 15
+                ? <span style={{ color: "#16a34a", fontWeight: 700 }}>
+                    ${pricePerSeat(customSeats).toFixed(2)}/seat · CAD ${calcMonthlyPrice(customSeats)}/month
+                  </span>
+                : <span style={{ color: S.textSoft }}>Enter a number ≥ 15</span>
+              }
+            </div>
+          </div>
+          {seatsErr && (
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6, paddingLeft: 4 }}>⚠ {seatsErr}</div>
+          )}
+
+          {/* Pricing tiers info */}
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "#f1f5f9", borderRadius: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: S.textSoft, marginBottom: 6, letterSpacing: ".06em" }}>VOLUME PRICING</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
+              {[
+                ["15–49",  "$12.00/seat"],
+                ["50–74",  "$10.50/seat"],
+                ["75–99",  "$10.00/seat"],
+                ["100+",   "$9.99/seat"],
+              ].map(([range, price]) => (
+                <div key={range} style={{ color: S.textSoft }}>
+                  <strong style={{ color: S.text }}>{range}</strong> · {price}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Duration selector */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>2. Select Duration</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Longer commitments get a discount</div>
+        </div>
+        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+          {QUOTE_MONTHS.map(m => (
+            <button key={m.value} onClick={() => setMonths(m.value)}
+              style={{
+                border: `2px solid ${months === m.value ? "#6366f1" : S.border}`,
+                borderRadius: 14, padding: "12px 16px", background: months === m.value ? "#eef2ff" : "#fff",
+                cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>{m.label}</div>
+              {m.discount && (
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#16a34a", background: "#dcfce7", padding: "2px 8px", borderRadius: 999 }}>{m.discount}</div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Quote summary */}
+      <div style={{ background: "linear-gradient(135deg,#eef2ff,#f5f3ff)", border: "2px solid #c7d2fe", borderRadius: 16, padding: "20px 24px" }}>
+        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#3730a3", marginBottom: 14 }}>YOUR QUOTE</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 0", fontSize: 13 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>PLAN</div>
+            <div style={{ fontWeight: 700, color: S.text }}>{effectiveSeats} seats</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>MONTHLY</div>
+            <div style={{ fontWeight: 700, color: S.text }}>
+              CAD ${discounted}
+              {disc > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: "#16a34a", fontWeight: 800 }}>({disc}% off)</span>}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
+            <div style={{ fontWeight: 700, color: S.text }}>{months} month{months > 1 ? "s" : ""}</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
+            <div style={{ fontSize: 11, color: "#6366f1" }}>for {months} month{months > 1 ? "s" : ""} · {effectiveSeats} seats</div>
+          </div>
+          <button
+            onClick={() => {
+              if (typeof customSeats !== "number" || customSeats < 15) {
+                setSeatsErr("Minimum 15 seats required");
+                return;
+              }
+              setStep("register");
+            }}
+            style={{ ...btnPrimary, padding: "14px 28px", fontSize: 14 }}
+          >
+            Proceed with this quote →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── Step 2: Register contract ── */
+  const templateData = {
+    organizationName: orgName, organizationAddress: orgAddress,
+    billingContactName: billingName, billingEmail, invoiceEmail: invoiceEmail || billingEmail,
+    primaryAdminName: signerName, primaryAdminEmail: adminEmail || billingEmail,
+    selectedPlan: planKey, selectedPlanPrice: discounted,
+    startDate, effectiveDate: effectiveDate || startDate,
+    initialTerm: months === 1 ? "Monthly" : `${months} months`,
+    autoRenew, billingMethod: billing,
+    clbprepSignerName: "Soheila Azizi", clbprepSignerTitle: "Azizi Online Learning Services",
+    specialNotes: notes,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Back to quote */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button onClick={() => setStep("quote")} style={{ ...btnOutline, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          ← Back to Quote
+        </button>
+        <div style={{ fontSize: 12, color: S.textSoft }}>
+          Quote: <strong>{effectiveSeats} seats · {months} month{months > 1 ? "s" : ""} · CAD ${total}</strong>
+        </div>
+      </div>
+
+      {/* Org info */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Organization Information</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Fill in your organization's details for the contract</div>
+        </div>
+        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          {[
+            { label: "Organization Legal Name *", val: orgName,      set: setOrgName,      span: 2 },
+            { label: "Organization Address",       val: orgAddress,   set: setOrgAddress,   span: 2 },
+            { label: "Billing Contact Name *",     val: billingName,  set: setBillingName   },
+            { label: "Billing Email *",             val: billingEmail, set: setBillingEmail, type: "email" },
+            { label: "Invoice Email",               val: invoiceEmail, set: setInvoiceEmail, type: "email" },
+            { label: "Admin Email",                 val: adminEmail,   set: setAdminEmail,   type: "email" },
+            { label: "Start Date *",                val: startDate,    set: setStartDate,    type: "date" },
+            { label: "Effective Date",              val: effectiveDate,set: setEffectiveDate,type: "date" },
+          ].map(({ label, val, set, span, type }) => (
+            <div key={label} style={{ gridColumn: span === 2 ? "1 / -1" : undefined }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
+              <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
+                style={{ ...inputStyle, width: "100%" }} />
+            </div>
+          ))}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Billing Method</label>
+            <select value={billing} onChange={e => setBilling(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
+              <option>Stripe invoice</option>
+              <option>Stripe payment link</option>
+              <option>Bank transfer</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
+            <input type="checkbox" id="crf-autorenew" checked={autoRenew} onChange={e => setAutoRenew(e.target.checked)}
+              style={{ accentColor: S.blue, width: 15, height: 15 }} />
+            <label htmlFor="crf-autorenew" style={{ fontSize: 12, color: S.text, cursor: "pointer" }}>Auto-renew at end of term</label>
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Special Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+              placeholder="Any additional requests or notes…"
+              style={{ ...inputStyle, width: "100%", resize: "vertical" }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Full contract to read */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Service Agreement</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Read the full contract below before agreeing and signing</div>
+        </div>
+        <div style={{ padding: "24px 28px", maxHeight: 500, overflowY: "auto", borderBottom: `1px solid ${S.border}` }}>
+          <ContractTemplate
+            data={templateData}
+            mode="preview"
+            orgSignerName={signerName}
+            orgSignerTitle={signerTitle}
+            orgSignature={signature}
+            orgSignedAt={signedDate}
+          />
+        </div>
+
+        {/* Agreement checkbox */}
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${S.border}` }}>
+          <label style={{
+            display: "flex", alignItems: "flex-start", gap: 12,
+            padding: "14px 16px",
+            background: agreed ? "#f0fdf4" : "#f8fafc",
+            border: `2px solid ${agreed ? "#4ade80" : S.border}`,
+            borderRadius: 12, cursor: "pointer", transition: "all .15s",
+          }}>
+            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)}
+              style={{ marginTop: 2, accentColor: "#16a34a", width: 16, height: 16, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: S.text, marginBottom: 3 }}>
+                I have read and agree to the full Service Agreement above
+              </div>
+              <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
+                I confirm I am authorized to enter into this agreement on behalf of <strong>{orgName || "my organization"}</strong> and accept all terms including payment obligations and cancellation policy.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        {/* Signature — visible only after agreeing */}
+        {agreed && (
+          <div style={{ padding: "16px 20px" }}>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>Your Signature</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              {[
+                { label: "Full Name *",              val: signerName,   set: setSignerName },
+                { label: "Title / Role *",            val: signerTitle,  set: setSignerTitle },
+                { label: "Electronic Signature *",    val: signature,    set: setSignature,  italic: true },
+                { label: "Date *",                    val: signedDate,   set: setSignedDate, type: "date" },
+              ].map(({ label, val, set, type, italic }) => (
+                <div key={label}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
+                  <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
+                    placeholder={label.includes("Signature") ? "Type your full legal name" : undefined}
+                    style={{ ...inputStyle, width: "100%", ...(italic ? { fontStyle: "italic", fontFamily: "Georgia, serif" } : {}) }} />
+                </div>
+              ))}
+            </div>
+
+            {submitErr && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, fontSize: 12, color: "#dc2626", fontWeight: 600, marginBottom: 14 }}>
+                ⚠ {submitErr}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button onClick={handleSubmit} disabled={submitting}
+                style={{ ...btnPrimary, opacity: submitting ? 0.7 : 1, padding: "12px 28px", fontSize: 13 }}>
+                {submitting ? "Submitting…" : "Submit Contract to CLBPrep →"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function OrgPartnerAdmin() {
   const nav = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -565,6 +1047,11 @@ export default function OrgPartnerAdmin() {
   const [adminName, setAdminName] = useState("");
   const [partnerName, setPartnerName] = useState("");
   const [contractSeats, setContractSeats] = useState(0);
+  const [orgUserId, setOrgUserId] = useState("");
+  const [contract,        setContract]        = useState<OrgContract | null>(null);
+  const [contractLoading, setContractLoading] = useState(false);
+  const [showContractRequestFlow, setShowContractRequestFlow] = useState(false);
+  const contractPdfRef = useRef<HTMLDivElement>(null);
   const [authErr, setAuthErr] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -628,6 +1115,7 @@ export default function OrgPartnerAdmin() {
         setAdminName(doc.name || me.name || "Partner Admin");
         setPartnerName(doc.partnerName);
         setContractSeats(safeNumber(doc.contractSeats ?? doc.seatLimit ?? doc.partnerSeats ?? 0));
+        setOrgUserId(doc.$id || me.$id);
       } catch (e: any) {
         setAuthErr(e?.message || "Unauthorized");
       } finally {
@@ -736,8 +1224,14 @@ export default function OrgPartnerAdmin() {
   };
 
   const refreshAll = async () => {
-    await Promise.all([loadGroups(), loadEligible(), loadLearners()]);
-    showToast("Refreshed.");
+    try {
+      const jobs: Promise<any>[] = [loadGroups(), loadEligible(), loadLearners()];
+      if (orgUserId) jobs.push(loadContract());
+      await Promise.all(jobs);
+      showToast("Refreshed.");
+    } catch (e: any) {
+      showToast(e?.message || "Refresh failed.", false);
+    }
   };
 
   const handleDeleteGroup = async (group: Group) => {
@@ -1031,6 +1525,180 @@ export default function OrgPartnerAdmin() {
       showToast(e?.message || "Failed to reactivate.", false);
     }
   };
+
+  const loadContract = useCallback(async () => {
+    if (!orgUserId) return;
+    setContractLoading(true);
+    try {
+      const doc = await getContractByOrgId(orgUserId);
+      setContract(doc);
+    } catch (e) {
+      console.error("Failed to load contract:", e);
+    } finally {
+      setContractLoading(false);
+    }
+  }, [orgUserId]);
+
+  useEffect(() => {
+    if (orgUserId) loadContract();
+  }, [orgUserId, loadContract]);
+
+  useEffect(() => {
+    if (!contract) {
+      return;
+    }
+    setShowContractRequestFlow(false);
+    if (contract.status !== "pending_payment") {
+    }
+  }, [contract?.$id, contract?.status, contract]);
+
+  const openContractPdfWindow = useCallback((autoPrint = false) => {
+    const html = contractPdfRef.current?.innerHTML;
+    if (!html) {
+      window.alert("Contract preview is not ready yet.");
+      return;
+    }
+
+    const fullHtml = `<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>CLBPrep Organization Contract</title>
+          <style>
+            html, body { margin: 0; padding: 0; background: #ffffff; }
+            body { font-family: Arial, Helvetica, sans-serif; padding: 32px; color: #132238; }
+            * { box-sizing: border-box; }
+            @page { size: auto; margin: 18mm; }
+            @media print {
+              html, body { background: #ffffff; }
+              body { padding: 0; }
+            }
+          </style>
+        </head>
+        <body>${html}</body>
+      </html>`;
+
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank", "width=1100,height=900");
+
+    if (!win) {
+      URL.revokeObjectURL(url);
+      window.alert("Please allow pop-ups to open the contract PDF view.");
+      return;
+    }
+
+    const cleanup = () => {
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    };
+
+    if (autoPrint) {
+      const tryPrint = () => {
+        try {
+          win.focus();
+          win.print();
+        } finally {
+          cleanup();
+        }
+      };
+
+      win.addEventListener("load", tryPrint, { once: true });
+      window.setTimeout(tryPrint, 900);
+      return;
+    }
+
+    cleanup();
+  }, []);
+
+  const startStripeCheckout = useCallback(async (currentContract: OrgContract) => {
+    try {
+      const currentFd = parseContractFormData(currentContract);
+      const { functions } = await import("../appwrite");
+      const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
+
+      if (!STRIPE_FUNCTION_ID) {
+        window.alert("VITE_APPWRITE_STRIPE_FUNCTION_ID is missing.");
+        return;
+      }
+
+      const execution = await functions.createExecution(
+        STRIPE_FUNCTION_ID,
+        JSON.stringify({
+          contractId: currentContract.$id,
+          orgId: orgUserId,
+          orgName: currentFd?.organizationName || partnerName,
+          seats: currentFd?.selectedPlan,
+          totalPrice: currentFd?.totalPrice,
+          months: currentFd?.months || 1,
+          email: currentFd?.primaryAdminEmail || currentFd?.billingEmail || "",
+        }),
+        false,
+        "/create-org-checkout",
+        "POST"
+      );
+
+      const result = JSON.parse(execution.responseBody || "{}");
+      if (result.url) {
+        window.location.href = result.url;
+      } else {
+        window.alert("Could not start checkout: " + (result.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      window.alert("Checkout failed: " + (e?.message || "Please try again."));
+    }
+  }, [orgUserId, partnerName]);
+
+  const renderContractDocumentPanel = useCallback((currentContract: OrgContract, options?: {
+    title?: string;
+    note?: string;
+    previewLabel?: string;
+  }) => {
+    const currentFd = parseContractFormData(currentContract);
+    const templateData = {
+      ...currentFd,
+      clbprepSignerName: currentContract.adminSignerName || "Soheila Azizi",
+      clbprepSignerTitle: currentContract.adminSignerTitle || "Owner",
+    };
+
+    return (
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>
+              {options?.title || "Contract Document"}
+            </div>
+            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 3 }}>
+              {options?.note || "Open the contract in a PDF-style window or print/save it as PDF."}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
+              <FolderOpen size={14} /> {options?.previewLabel || "View PDF"}
+            </button>
+            <button type="button" onClick={() => openContractPdfWindow(true)} style={btnPrimary}>
+              <Download size={14} /> Download / Print PDF
+            </button>
+          </div>
+        </div>
+        <div style={{ maxHeight: 560, overflowY: "auto", padding: "24px 28px" }}>
+          <div ref={contractPdfRef}>
+            <ContractTemplate
+              data={templateData as any}
+              mode="signed"
+              orgSignerName={currentContract.orgSignerName}
+              orgSignerTitle={currentContract.orgSignerTitle}
+              orgSignature={currentContract.orgSignature}
+              orgSignedAt={currentContract.orgSignedAt}
+              adminSignerName={currentContract.adminSignerName || "Soheila Azizi"}
+              adminSignerTitle={currentContract.adminSignerTitle || "Owner"}
+              adminApprovedAt={currentContract.adminApprovedAt}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }, [btnOutline, btnPrimary, openContractPdfWindow]);
 
   const openPage = (next: Page) => {
     setPage(next);
@@ -1338,6 +2006,26 @@ export default function OrgPartnerAdmin() {
             Eligible Users
           </button>
 
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: 0.3, padding: "16px 8px 8px" }}>CONTRACT</div>
+          <button
+            onClick={() => openPage("contract")}
+            className="opa-nav"
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 10,
+              border: "none",
+              background: page === "contract" ? "rgba(74,124,243,.22)" : "transparent",
+              color: page === "contract" ? "#beddff" : "rgba(255,255,255,.62)",
+              borderRadius: 12, padding: "11px 12px", fontSize: 14, fontWeight: 700,
+              fontFamily: "inherit", cursor: "pointer", textAlign: "left", position: "relative",
+            }}
+          >
+            <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><FileCheck size={16} /></span>
+            Contract
+            {contract?.status === "pending_org" && (
+              <span style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+            )}
+          </button>
+
           <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: 0.3, padding: "16px 8px 8px" }}>REPORTS</div>
           <button
             onClick={() => setPage("reports" as any)}
@@ -1396,6 +2084,7 @@ export default function OrgPartnerAdmin() {
               {page === "eligible" && !selectedEligible && "Eligible Users"}
               {page === "eligible" && selectedEligible && (selectedEligible.name || selectedEligible.email)}
               {(page as any) === "reports" && "Export Reports"}
+              {page === "contract" && "Organization Contract"}
             </div>
           </div>
 
@@ -2209,6 +2898,190 @@ export default function OrgPartnerAdmin() {
               </div>
             </>
           )}
+          {/* ══ CONTRACT ══ */}
+          {page === "contract" && (() => {
+            const fd = contract ? parseContractFormData(contract) : null;
+
+            // ── Loading ──
+            if (contractLoading) return (
+              <div style={{ background: "#fff", borderRadius: 16, padding: 40, textAlign: "center", border: `1px solid ${S.border}` }}>
+                <Loader2 size={28} style={{ animation: "spin 1s linear infinite", color: S.blue, margin: "0 auto 10px" }} />
+                <div style={{ fontSize: 13, color: S.textSoft }}>Loading…</div>
+              </div>
+            );
+
+            // ── Already signed / paid / cancelled ──
+            if (contract && contract.status === "pending_payment") return (
+              <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
+                <CheckCircle size={36} style={{ color: S.blue, margin: "0 auto 12px" }} />
+                <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Approved!</div>
+                <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6, marginBottom: 20 }}>
+                  CLBPrep has reviewed and approved your contract.<br />
+                  Click below to continue to Stripe, complete payment, and activate your seats.
+                </div>
+                <div style={{ marginBottom: 16, padding: "12px 20px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, display: "inline-flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
+                  {[
+                    ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/month`],
+                    ["Term", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
+                    ["Start", fd?.startDate || "—"],
+                    ["Total", `CAD $${fd?.totalPrice}`],
+                  ].map(([l, v]) => (
+                    <div key={l} style={{ display: "flex", gap: 16, fontSize: 12 }}>
+                      <span style={{ color: S.textSoft, width: 60 }}>{l}</span>
+                      <span style={{ fontWeight: 700, color: S.text }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => startStripeCheckout(contract)}
+                    style={{ ...btnPrimary, padding: "12px 28px", fontSize: 13 }}
+                  >
+                    Proceed to Payment →
+                  </button>
+                </div>
+              </div>
+            );
+
+            if (contract && contract.status === "paid") return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
+                  <CheckCircle size={36} style={{ color: S.green, margin: "0 auto 12px" }} />
+                  <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Active</div>
+                  <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
+                    Your contract is active and your {fd?.selectedPlan} seats are enabled.<br />
+                    Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
+                    Signed by <strong>{contract.orgSignerName}</strong> on {contract.orgSignedAt ? new Date(contract.orgSignedAt).toLocaleDateString("en-CA") : "—"}
+                  </div>
+                </div>
+
+                {renderContractDocumentPanel(contract, {
+                  title: "Active Contract",
+                  note: "You can open the active contract in a PDF-style view or download/save it as PDF anytime.",
+                })}
+              </div>
+            );
+
+            if (contract && contract.status === "cancelled") return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <AlertCircle size={20} style={{ color: S.red, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Previous contract was cancelled</div>
+                      <div style={{ fontSize: 12, color: S.textSoft }}>
+                        You can request a new quote below. Contact <a href="mailto:support@clbprep.com" style={{ color: S.blue }}>support@clbprep.com</a> if you have questions.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContractRequestFlow((prev) => !prev)}
+                    style={showContractRequestFlow ? btnOutline : btnPrimary}
+                  >
+                    {showContractRequestFlow ? "Hide Quote Form" : "Request New Quote"}
+                  </button>
+                </div>
+
+                {showContractRequestFlow && (
+                  <ContractRequestFlow
+                    partnerName={partnerName}
+                    orgUserId={orgUserId}
+                    adminName={adminName}
+                    onSubmitted={() => {
+                      setShowContractRequestFlow(false);
+                      loadContract();
+                    }}
+                    S={S}
+                    titleFont={titleFont}
+                    inputStyle={inputStyle}
+                    btnPrimary={btnPrimary}
+                    btnOutline={btnOutline}
+                  />
+                )}
+              </div>
+            );
+
+            // ── Pending admin review ──
+            if (contract && contract.status === "pending_admin") return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+                  <div style={{ padding: "16px 20px", background: "#fffbeb", borderBottom: "1px solid #fde68a", display: "flex", alignItems: "center", gap: 10 }}>
+                    <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0 }} />
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>
+                      Your contract request has been submitted and is under review by CLBPrep. We'll notify you by email once it's approved.
+                    </div>
+                  </div>
+                  <div style={{ padding: "20px 24px" }}>
+                    <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>Submission Summary</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px", fontSize: 12 }}>
+                      {[
+                        ["Organization", fd?.organizationName],
+                        ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/mo`],
+                        ["Duration", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
+                        ["Total", `CAD $${fd?.totalPrice}`],
+                        ["Start Date", fd?.startDate],
+                        ["Submitted", new Date(contract.createdAt).toLocaleDateString("en-CA")],
+                        ["Signed By", contract.orgSignerName],
+                      ].map(([l, v]) => (
+                        <div key={l}>
+                          <div style={{ color: S.textSoft, fontSize: 10, fontWeight: 800, letterSpacing: ".06em", marginBottom: 2 }}>{l}</div>
+                          <div style={{ fontWeight: 600, color: S.text }}>{v || "—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", textAlign: "center" }}>
+                  <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, color: S.text, marginBottom: 6 }}>
+                    Contract Preview Locked
+                  </div>
+                  <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
+                    The contract PDF and full contract preview will become available only after CLBPrep approves the request and payment is completed.
+                  </div>
+                </div>
+              </div>
+            );
+
+            // ── No contract yet — show Request New Quote first ──
+            if (!showContractRequestFlow) {
+              return (
+                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "26px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>No contract on file yet</div>
+                    <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
+                      Start by requesting a new quote. The contract PDF will stay locked until CLBPrep approves the request and payment is completed.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContractRequestFlow(true)}
+                    style={btnPrimary}
+                  >
+                    Request New Quote
+                  </button>
+                </div>
+              );
+            }
+
+            return <ContractRequestFlow
+              partnerName={partnerName}
+              orgUserId={orgUserId}
+              adminName={adminName}
+              onSubmitted={() => {
+                setShowContractRequestFlow(false);
+                loadContract();
+              }}
+              S={S}
+              titleFont={titleFont}
+              inputStyle={inputStyle}
+              btnPrimary={btnPrimary}
+              btnOutline={btnOutline}
+            />;
+          })()}
+
           {/* ══ REPORTS ══ */}
           {(page as any) === "reports" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>

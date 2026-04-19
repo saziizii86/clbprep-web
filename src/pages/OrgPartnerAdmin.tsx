@@ -47,6 +47,8 @@ const PARTNER_ELIGIBILITY_COLLECTION_ID =
   (import.meta.env.VITE_PARTNER_ELIGIBILITY_COLLECTION_ID || "partner_eligibility").trim();
 const PARTNER_GROUPS_COLLECTION_ID =
   (import.meta.env.VITE_PARTNER_GROUPS_COLLECTION_ID || "partner_groups").trim();
+const ORG_CONTRACTS_COLLECTION_ID =
+  (import.meta.env.VITE_ORG_CONTRACTS_COLLECTION_ID || "org_contracts").trim();
 
 type Page = "dashboard" | "groups" | "learners" | "eligible" | "contract";
 type AddMode = "single" | "bulk";
@@ -1563,10 +1565,40 @@ export default function OrgPartnerAdmin() {
     if (!orgUserId) return;
     setContractLoading(true);
     try {
-      const doc = await getContractByOrgId(orgUserId);
-      setContract(doc);
+      // Fetch ALL contracts for this org and pick by priority:
+      // paid > pending_payment > pending_admin > pending_org > expired > cancelled
+      const STATUS_PRIORITY: Record<string, number> = {
+        paid:            0,
+        pending_payment: 1,
+        pending_admin:   2,
+        pending_org:     3,
+        expired:         4,
+        cancelled:       5,
+      };
+      const res = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
+        Query.equal("orgId", orgUserId),
+        Query.orderDesc("$createdAt"),
+        Query.limit(50),
+      ]);
+      if (!res.documents.length) {
+        setContract(null);
+        return;
+      }
+      const sorted = [...res.documents].sort((a: any, b: any) => {
+        const pa = STATUS_PRIORITY[a.status] ?? 99;
+        const pb = STATUS_PRIORITY[b.status] ?? 99;
+        if (pa !== pb) return pa - pb;
+        // Same priority → newest first
+        return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
+      });
+      setContract(sorted[0] as unknown as OrgContract);
     } catch (e) {
       console.error("Failed to load contract:", e);
+      // Fallback to contractsService if direct query fails
+      try {
+        const doc = await getContractByOrgId(orgUserId);
+        setContract(doc);
+      } catch {}
     } finally {
       setContractLoading(false);
     }

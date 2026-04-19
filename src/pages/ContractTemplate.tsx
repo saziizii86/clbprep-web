@@ -301,8 +301,9 @@ export default function ContractTemplate({
         )}
 
         <Clause>
-          If payment is not received within 3 business days after the due date, CLBPrep may suspend access to the Platform
-          upon written notice until the outstanding amount is paid.
+          For any renewal or new term, payment must be received before the next term begins, unless otherwise agreed in
+          writing. If payment for a renewal or new term is not received, access to the Platform will remain active only
+          until the end of the current paid term and will then end automatically on the contract expiry date.
         </Clause>
       </Section>
 

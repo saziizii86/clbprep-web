@@ -297,23 +297,46 @@ function getContractDurationDays(formData: Record<string, any>): number {
 
 function getContractTiming(contract: any) {
   const formData = safeParseContractFormData(contract);
-  const start = parseDateOnlyUTC(formData?.effectiveDate || formData?.startDate);
+  const contractStart = parseDateOnlyUTC(formData?.startDate);
+  const effectiveStart = parseDateOnlyUTC(formData?.effectiveDate || formData?.startDate);
   const baseDurationDays = getContractDurationDays(formData);
   const carryoverDaysRaw = Number(formData?.carryoverDays ?? formData?.rolloverDays ?? 0);
   const carryoverDays = Number.isFinite(carryoverDaysRaw) && carryoverDaysRaw > 0
     ? Math.round(carryoverDaysRaw)
     : 0;
   const totalDurationDays = baseDurationDays + carryoverDays;
-  const end = start ? addUtcDays(start, totalDurationDays) : null;
+  const end = effectiveStart ? addUtcDays(effectiveStart, totalDurationDays) : null;
 
   return {
     formData,
-    start,
+    contractStart,
+    start: effectiveStart,
+    effectiveStart,
     end,
     baseDurationDays,
     carryoverDays,
     totalDurationDays,
   };
+}
+
+function getTodayUtcDate(): Date {
+  return parseDateOnlyUTC(new Date()) || new Date();
+}
+
+function getPaidContractPhase(contract: any, todayArg?: Date | null) {
+  const timing = getContractTiming(contract);
+  const today = todayArg || getTodayUtcDate();
+
+  if (!timing.effectiveStart || !timing.end) {
+    return { timing, phase: "unknown" as const };
+  }
+  if (today.getTime() < timing.effectiveStart.getTime()) {
+    return { timing, phase: "scheduled" as const };
+  }
+  if (today.getTime() >= timing.end.getTime()) {
+    return { timing, phase: "expired" as const };
+  }
+  return { timing, phase: "active" as const };
 }
 
 
@@ -753,8 +776,8 @@ function ContractRequestFlow({
   const [adminEmail, setAdminEmail] = React.useState("");
   const [startDate, setStartDate] = React.useState("");
   const [effectiveDate, setEffectiveDate] = React.useState("");
-  const [autoRenew, setAutoRenew] = React.useState(false);
-  const [billing, setBilling] = React.useState("Stripe invoice");
+  const autoRenew = false;
+  const billing = "Stripe Checkout";
   const [notes, setNotes] = React.useState("");
   const [agreed, setAgreed] = React.useState(false);
   const [signerName, setSignerName] = React.useState(adminName || "");
@@ -787,9 +810,19 @@ function ContractRequestFlow({
         ? "1 month"
         : `${months} months`;
 
-  const startDateForValidation = React.useMemo(
-    () => parseDateOnlyUTC(startDate || effectiveDate),
-    [startDate, effectiveDate]
+  const todayDateValue = React.useMemo(
+    () => formatContractDate(getTodayUtcDate().toISOString()),
+    []
+  );
+
+  const contractStartDate = React.useMemo(
+    () => parseDateOnlyUTC(startDate),
+    [startDate]
+  );
+
+  const effectiveDateForValidation = React.useMemo(
+    () => parseDateOnlyUTC(effectiveDate || startDate),
+    [effectiveDate, startDate]
   );
 
   const recommendedRenewalStart = React.useMemo(() => {
@@ -797,18 +830,60 @@ function ContractRequestFlow({
     return addUtcDays(activeTiming.end, -3);
   }, [activeTiming]);
 
+  const recommendedEffectiveDate = React.useMemo(() => {
+    if (!activeTiming?.end) return null;
+    return recommendedRenewalStart || activeTiming.end;
+  }, [activeTiming, recommendedRenewalStart]);
+
+  const effectiveDateMinValue = React.useMemo(() => {
+    let minDate = contractStartDate || getTodayUtcDate();
+    if (recommendedRenewalStart && recommendedRenewalStart.getTime() > minDate.getTime()) {
+      minDate = recommendedRenewalStart;
+    }
+    return formatContractDate(minDate.toISOString());
+  }, [contractStartDate, recommendedRenewalStart]);
+
+  React.useEffect(() => {
+    if (!startDate) {
+      setStartDate(todayDateValue);
+    }
+  }, [startDate, todayDateValue]);
+
+  React.useEffect(() => {
+    if (effectiveDate || !startDate) return;
+    const startOnly = parseDateOnlyUTC(startDate);
+    let nextEffective = recommendedEffectiveDate || startOnly;
+    if (startOnly && nextEffective && startOnly.getTime() > nextEffective.getTime()) {
+      nextEffective = startOnly;
+    }
+    if (nextEffective) {
+      setEffectiveDate(formatContractDate(nextEffective.toISOString()));
+    }
+  }, [effectiveDate, recommendedEffectiveDate, startDate]);
+
   const overlapDays = React.useMemo(() => {
-    if (!activeTiming?.end || !startDateForValidation) return 0;
-    if (startDateForValidation.getTime() >= activeTiming.end.getTime()) return 0;
-    return diffUtcDays(startDateForValidation, activeTiming.end);
-  }, [activeTiming, startDateForValidation]);
+    if (!activeTiming?.end || !effectiveDateForValidation) return 0;
+    if (effectiveDateForValidation.getTime() >= activeTiming.end.getTime()) return 0;
+    return diffUtcDays(effectiveDateForValidation, activeTiming.end);
+  }, [activeTiming, effectiveDateForValidation]);
 
   const carryoverDays = overlapDays > 0 && overlapDays <= 3 ? overlapDays : 0;
 
   const projectedEndDate = React.useMemo(() => {
-    if (!startDateForValidation) return null;
-    return addUtcDays(startDateForValidation, selectedDurationDays + carryoverDays);
-  }, [startDateForValidation, selectedDurationDays, carryoverDays]);
+    if (!effectiveDateForValidation) return null;
+    return addUtcDays(effectiveDateForValidation, selectedDurationDays + carryoverDays);
+  }, [effectiveDateForValidation, selectedDurationDays, carryoverDays]);
+
+  const effectiveDateErr = React.useMemo(() => {
+    if (!effectiveDateForValidation) return "";
+    if (contractStartDate && effectiveDateForValidation.getTime() < contractStartDate.getTime()) {
+      return "Effective date cannot be earlier than the contract start date.";
+    }
+    if (recommendedRenewalStart && effectiveDateForValidation.getTime() < recommendedRenewalStart.getTime()) {
+      return `Effective date cannot be earlier than ${formatContractDate(recommendedRenewalStart.toISOString())}.`;
+    }
+    return "";
+  }, [contractStartDate, effectiveDateForValidation, recommendedRenewalStart]);
 
   const renewalNotice = React.useMemo(() => {
     if (!activeTiming?.end) return null;
@@ -817,21 +892,29 @@ function ContractRequestFlow({
       ? formatContractDate(recommendedRenewalStart.toISOString())
       : expiryLabel;
 
-    if (!startDateForValidation) {
+    if (!effectiveDateForValidation) {
       return {
         tone: "info" as const,
         title: "Current contract on file",
         body:
           `Your current contract expires on ${expiryLabel}. ` +
-          `For a smooth renewal, it is best to start the new contract between ${suggestedStartLabel} and ${expiryLabel}. ` +
-          `If you start within the last 3 days, those remaining days will be added to the new expiry date.`,
+          `You can sign the new contract today, but the effective date should normally be between ${suggestedStartLabel} and ${expiryLabel} so service continues without disruption. ` +
+          `If the effective date is within the last 3 days, those remaining days will be added to the new expiry date.`,
+      };
+    }
+
+    if (effectiveDateErr) {
+      return {
+        tone: "warn" as const,
+        title: "Adjust the effective date",
+        body: `${effectiveDateErr} Your current contract expires on ${expiryLabel}.`,
       };
     }
 
     if (overlapDays > 3) {
       return {
         tone: "warn" as const,
-        title: "This start date overlaps your current contract",
+        title: "This effective date overlaps too early",
         body:
           `You already have an active contract that expires on ${expiryLabel}. ` +
           `Only the last 3 remaining days can be carried forward. ` +
@@ -845,17 +928,17 @@ function ContractRequestFlow({
         title: `${carryoverDays} day${carryoverDays !== 1 ? "s" : ""} will be added to the new expiry date`,
         body:
           `Your current contract expires on ${expiryLabel}. ` +
-          `Because this new contract starts within the final 3 days, those ${carryoverDays} remaining day${carryoverDays !== 1 ? "s" : ""} ` +
+          `Because this contract becomes effective within the final 3 days, those ${carryoverDays} remaining day${carryoverDays !== 1 ? "s" : ""} ` +
           `will be added. New projected expiry: ${projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : "—"}.`,
       };
     }
 
     return {
       tone: "neutral" as const,
-      title: "No overlap with the current contract",
-      body: `Your current contract expires on ${expiryLabel}.`,
+      title: "Effective date is valid",
+      body: `Your current contract expires on ${expiryLabel}. This effective date will continue service without disruption.`,
     };
-  }, [activeTiming, carryoverDays, overlapDays, projectedEndDate, recommendedRenewalStart, startDateForValidation]);
+  }, [activeTiming, carryoverDays, effectiveDateErr, effectiveDateForValidation, overlapDays, projectedEndDate, recommendedRenewalStart]);
 
   const handleContinueToRegister = () => {
     let hasError = false;
@@ -892,14 +975,23 @@ function ContractRequestFlow({
       return;
     }
     if (!startDate) {
-      setSubmitErr("Please set a start date.");
+      setSubmitErr("Please set a contract start date.");
+      return;
+    }
+    if (!effectiveDate) {
+      setSubmitErr("Please set a service effective date.");
+      return;
+    }
+    if (effectiveDateErr) {
+      setSubmitErr(effectiveDateErr);
       return;
     }
 
-    const startForSubmit = parseDateOnlyUTC(startDate || effectiveDate);
+    const startForSubmit = parseDateOnlyUTC(startDate);
+    const effectiveForSubmit = parseDateOnlyUTC(effectiveDate || startDate);
     const carryoverForSubmit =
-      activeTiming?.end && startForSubmit && startForSubmit.getTime() < activeTiming.end.getTime()
-        ? Math.min(3, diffUtcDays(startForSubmit, activeTiming.end))
+      activeTiming?.end && effectiveForSubmit && effectiveForSubmit.getTime() < activeTiming.end.getTime()
+        ? Math.min(3, diffUtcDays(effectiveForSubmit, activeTiming.end))
         : 0;
 
     setSubmitting(true);
@@ -913,7 +1005,7 @@ function ContractRequestFlow({
           ? `${carryoverForSubmit} carryover day${carryoverForSubmit !== 1 ? "s" : ""} should be added because the new contract starts within the final 3 days of the current term.`
           : "",
         overlapDays > 3
-          ? `Selected start date overlaps the current contract by ${overlapDays} days.`
+          ? `Selected effective date overlaps the current contract by ${overlapDays} days.`
           : "",
       ].filter(Boolean);
 
@@ -930,7 +1022,7 @@ function ContractRequestFlow({
         primaryAdminName: signerName,
         primaryAdminEmail: adminEmail || billingEmail,
         startDate,
-        effectiveDate: effectiveDate || startDate,
+        effectiveDate,
         initialTerm: selectedDurationLabel,
         autoRenew,
         billingMethod: billing,
@@ -978,7 +1070,8 @@ function ContractRequestFlow({
               `  Plan: ${effectiveSeats} seats — CAD $${monthlyAfterDiscount}/month`,
               `  Duration: ${selectedDurationLabel}`,
               `  Total: CAD $${total}`,
-              `  Start Date: ${startDate}`,
+              `  Contract Start Date: ${startDate}`,
+              `  Effective Date: ${effectiveDate}`,
               carryoverForSubmit > 0
                 ? `  Carryover Days: ${carryoverForSubmit} (new expiry extends automatically)`
                 : null,
@@ -1015,7 +1108,7 @@ function ContractRequestFlow({
     selectedPlan: String(effectiveSeats),
     selectedPlanPrice: monthlyAfterDiscount,
     startDate,
-    effectiveDate: effectiveDate || startDate,
+    effectiveDate,
     initialTerm: selectedDurationLabel,
     autoRenew,
     billingMethod: billing,
@@ -1379,9 +1472,9 @@ function ContractRequestFlow({
             { label: "Billing Email *", val: billingEmail, set: setBillingEmail, type: "email" },
             { label: "Invoice Email", val: invoiceEmail, set: setInvoiceEmail, type: "email" },
             { label: "Admin Email", val: adminEmail, set: setAdminEmail, type: "email" },
-            { label: "Start Date *", val: startDate, set: setStartDate, type: "date" },
-            { label: "Effective Date", val: effectiveDate, set: setEffectiveDate, type: "date" },
-          ].map(({ label, val, set, span, type }) => (
+            { label: "Contract Start Date *", val: startDate, set: setStartDate, type: "date", min: todayDateValue },
+            { label: "Service Effective Date *", val: effectiveDate, set: setEffectiveDate, type: "date", min: effectiveDateMinValue },
+          ].map(({ label, val, set, span, type, min }) => (
             <div key={label} style={{ gridColumn: span === 2 ? "1 / -1" : undefined }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
                 {label}
@@ -1389,11 +1482,18 @@ function ContractRequestFlow({
               <input
                 type={type || "text"}
                 value={val}
+                min={min}
                 onChange={(e) => set(e.target.value)}
                 style={{ ...inputStyle, width: "100%" }}
               />
             </div>
           ))}
+
+          {effectiveDateErr && (
+            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#dc2626", fontWeight: 700 }}>
+              ⚠ {effectiveDateErr}
+            </div>
+          )}
 
           {renewalNotice && (
             <div style={{ gridColumn: "1 / -1" }}>
@@ -1481,29 +1581,26 @@ function ContractRequestFlow({
             </div>
           )}
 
-          <div>
+          <div style={{ gridColumn: "1 / -1" }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
-              Billing Method
+              Payment Method
             </label>
-            <select value={billing} onChange={(e) => setBilling(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
-              <option>Stripe invoice</option>
-              <option>Stripe payment link</option>
-              <option>Bank transfer</option>
-              <option>Other</option>
-            </select>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
-            <input
-              type="checkbox"
-              id="crf-autorenew"
-              checked={autoRenew}
-              onChange={(e) => setAutoRenew(e.target.checked)}
-              style={{ accentColor: S.blue, width: 15, height: 15 }}
-            />
-            <label htmlFor="crf-autorenew" style={{ fontSize: 12, color: S.text, cursor: "pointer" }}>
-              Auto-renew at end of term
-            </label>
+            <div
+              style={{
+                ...inputStyle,
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                background: "#f8fafc",
+                color: S.text,
+                fontWeight: 700,
+              }}
+            >
+              Stripe Checkout
+            </div>
+            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 6 }}>
+              Organization contract payments are processed through Stripe Checkout.
+            </div>
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
@@ -2165,19 +2262,8 @@ export default function OrgPartnerAdmin() {
     if (!orgUserId) return;
     setContractLoading(true);
     try {
-      // Fetch ALL contracts for this org and pick by priority:
-      // paid > pending_payment > pending_admin > pending_org > expired > cancelled
-      const STATUS_PRIORITY: Record<string, number> = {
-        paid:            0,
-        pending_payment: 1,
-        pending_admin:   2,
-        pending_org:     3,
-        expired:         4,
-        cancelled:       5,
-      };
       let docs: any[] = [];
 
-      // Try by orgId first
       const byOrgId = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
         Query.equal("orgId", orgUserId),
         Query.orderDesc("$createdAt"),
@@ -2185,7 +2271,6 @@ export default function OrgPartnerAdmin() {
       ]);
       docs = byOrgId.documents;
 
-      // Fallback: query by partnerName if orgId returned nothing
       if (!docs.length && partnerName) {
         const byPartner = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
           Query.equal("orgName", partnerName),
@@ -2195,58 +2280,110 @@ export default function OrgPartnerAdmin() {
         docs = byPartner.documents;
       }
 
-      const res = { documents: docs };
-      if (!res.documents.length) {
+      if (!docs.length) {
         setContract(null);
         setAllContracts([]);
         setPendingRenewal(null);
         return;
       }
 
-      const todayMs = new Date().setUTCHours(0, 0, 0, 0);
+      const today = getTodayUtcDate();
+      const paidContracts = docs.filter((doc: any) => doc.status === "paid");
 
-      const sorted = [...res.documents].sort((a: any, b: any) => {
-        const pa = STATUS_PRIORITY[a.status] ?? 99;
-        const pb = STATUS_PRIORITY[b.status] ?? 99;
-        if (pa !== pb) return pa - pb;
-        // Among paid contracts: prefer the one valid for today
+      const currentPaid = [...paidContracts]
+        .filter((doc: any) => getPaidContractPhase(doc, today).phase === "active")
+        .sort((a: any, b: any) => {
+          const aTiming = getContractTiming(a);
+          const bTiming = getContractTiming(b);
+          const aStart = aTiming.effectiveStart?.getTime() || 0;
+          const bStart = bTiming.effectiveStart?.getTime() || 0;
+          if (aStart !== bStart) return bStart - aStart;
+          return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
+        })[0] || null;
+
+      const scheduledPaid = [...paidContracts]
+        .filter((doc: any) => getPaidContractPhase(doc, today).phase === "scheduled")
+        .sort((a: any, b: any) => {
+          const aStart = getContractTiming(a).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
+          const bStart = getContractTiming(b).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
+          if (aStart !== bStart) return aStart - bStart;
+          return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
+        })[0] || null;
+
+      const pendingPayment = docs
+        .filter((doc: any) => doc.status === "pending_payment")
+        .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
+
+      const pendingReview = docs
+        .filter((doc: any) => ["pending_admin", "pending_org"].includes(doc.status))
+        .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
+
+      const expiredOrOther = [...docs].sort((a: any, b: any) => {
+        const aTiming = getContractTiming(a);
+        const bTiming = getContractTiming(b);
+        return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
+      })[0] || null;
+
+      const displayContract =
+        currentPaid ||
+        scheduledPaid ||
+        pendingPayment ||
+        pendingReview ||
+        expiredOrOther ||
+        null;
+
+      const sortedContracts = [...docs].sort((a: any, b: any) => {
+        const score = (doc: any) => {
+          if (doc.status === "paid") {
+            const phase = getPaidContractPhase(doc, today).phase;
+            if (phase === "active") return 0;
+            if (phase === "scheduled") return 1;
+            if (phase === "expired") return 5;
+            return 6;
+          }
+          if (doc.status === "pending_payment") return 2;
+          if (doc.status === "pending_admin") return 3;
+          if (doc.status === "pending_org") return 4;
+          if (doc.status === "expired") return 6;
+          if (doc.status === "cancelled") return 7;
+          return 8;
+        };
+
+        const sa = score(a);
+        const sb = score(b);
+        if (sa !== sb) return sa - sb;
+
+        const aTiming = getContractTiming(a);
+        const bTiming = getContractTiming(b);
+
         if (a.status === "paid" && b.status === "paid") {
-          const aExpiry = getContractTiming(a).end?.getTime() || 0;
-          const bExpiry = getContractTiming(b).end?.getTime() || 0;
-          const aValid = aExpiry > todayMs;
-          const bValid = bExpiry > todayMs;
-          if (aValid && !bValid) return -1;
-          if (!aValid && bValid) return 1;
-          // Both valid → latest expiry first
-          return bExpiry - aExpiry;
+          const aStart = aTiming.effectiveStart?.getTime() || 0;
+          const bStart = bTiming.effectiveStart?.getTime() || 0;
+          if (sa === 0 || sa === 1) {
+            if (aStart !== bStart) return bStart - aStart;
+            return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
+          }
+          return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
         }
-        // Same priority → newest first
+
         return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
       });
 
-      const topContract = sorted[0] as unknown as OrgContract;
       const uniqueContracts = Array.from(
-        new Map(
-          [topContract, ...sorted].filter(Boolean).map((item: any) => [item.$id, item])
-        ).values()
+        new Map(sortedContracts.filter(Boolean).map((item: any) => [item.$id, item])).values()
       ) as unknown as OrgContract[];
 
-      setContract(topContract);
+      setContract(displayContract as OrgContract | null);
       setAllContracts(uniqueContracts);
 
-      // If the top contract is paid, check if there's also a pending renewal
-      const top = sorted[0] as any;
-      if (top.status === "paid") {
-        const renewal = sorted.find((c: any) =>
-          ["pending_admin", "pending_org", "pending_payment"].includes(c.status)
-        );
-        setPendingRenewal(renewal ? renewal as unknown as OrgContract : null);
-      } else {
-        setPendingRenewal(null);
-      }
+      const queuedRenewal =
+        currentPaid
+          ? (scheduledPaid || pendingPayment || pendingReview)
+          : (pendingPayment || pendingReview || null);
+
+      setPendingRenewal((queuedRenewal || null) as OrgContract | null);
     } catch (e) {
       console.error("Failed to load contract:", e);
-      // Fallback to contractsService if direct query fails
       try {
         const doc = await getContractByOrgId(orgUserId);
         setContract(doc);
@@ -3652,6 +3789,7 @@ export default function OrgPartnerAdmin() {
           {/* ══ CONTRACT ══ */}
           {page === "contract" && (() => {
             const fd = contract ? parseContractFormData(contract) : null;
+            const paidPhase = contract && contract.status === "paid" ? getPaidContractPhase(contract) : null;
 
             // ── Loading ──
             if (contractLoading) return (
@@ -3714,22 +3852,31 @@ export default function OrgPartnerAdmin() {
                   </div>
                 </div>
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
-                  <CheckCircle size={36} style={{ color: S.green, margin: "0 auto 12px" }} />
-                  <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Active</div>
+                  <CheckCircle size={36} style={{ color: paidPhase?.phase === "scheduled" ? S.blue : S.green, margin: "0 auto 12px" }} />
+                  <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>
+                    {paidPhase?.phase === "scheduled" ? "Contract Scheduled" : "Contract Active"}
+                  </div>
                   <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
-                    Your contract is active and your {fd?.selectedPlan} seats are enabled.<br />
+                    {paidPhase?.phase === "scheduled"
+                      ? <>Your next contract has been signed and paid, and will activate for your {fd?.selectedPlan} seats on the effective date below.<br /></>
+                      : <>Your current contract is active and your {fd?.selectedPlan} seats are enabled.<br /></>
+                    }
                     Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
                     Signed by <strong>{contract.orgSignerName}</strong> on {formatContractDate(contract.orgSignedAt)}<br />
-                    {(fd?.effectiveDate || fd?.startDate) && <>Service starts <strong>{formatContractDate(fd?.effectiveDate || fd?.startDate)}</strong><br /></>}
+                    {fd?.startDate && <>Contract start date <strong>{formatContractDate(fd.startDate)}</strong><br /></>}
+                    {fd?.effectiveDate && <>Effective date <strong>{formatContractDate(fd.effectiveDate)}</strong><br /></>}
                     {(() => {
                       const timing = getContractTiming(contract);
                       if (!timing.end) return null;
                       const expiry = formatContractDate(timing.end.toISOString());
-                      const today = parseDateOnlyUTC(new Date());
-                      const daysLeft = today ? Math.max(0, Math.ceil((timing.end.getTime() - today.getTime()) / MS_PER_DAY)) : 0;
+                      const today = getTodayUtcDate();
+                      const daysLeft = Math.max(0, Math.ceil((timing.end.getTime() - today.getTime()) / MS_PER_DAY));
                       return (
                         <>
-                          Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)
+                          {paidPhase?.phase === "scheduled"
+                            ? <>Scheduled to end <strong>{expiry}</strong></>
+                            : <>Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)</>
+                          }
                           {timing.carryoverDays > 0 && (
                             <>
                               <br />
@@ -3753,20 +3900,30 @@ export default function OrgPartnerAdmin() {
 
                 {/* ── Pending renewal notice (shown when a new contract is under review) ── */}
                 {pendingRenewal && (
-                  <div style={{ background: pendingRenewal.status === "pending_payment" ? "#f0fdf4" : "#fffbeb", border: `1px solid ${pendingRenewal.status === "pending_payment" ? "#86efac" : "#fde68a"}`, borderRadius: 16, padding: "20px 24px" }}>
+                  <div style={{ background: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#f0fdf4" : "#fffbeb", border: `1px solid ${pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#86efac" : "#fde68a"}`, borderRadius: 16, padding: "20px 24px" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                      {pendingRenewal.status === "pending_payment"
+                      {pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment"
                         ? <CheckCircle size={16} style={{ color: "#16a34a", flexShrink: 0, marginTop: 2 }} />
                         : <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0, marginTop: 2 }} />
                       }
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: pendingRenewal.status === "pending_payment" ? "#14532d" : "#92400e", marginBottom: 3 }}>
-                          {pendingRenewal.status === "pending_payment"
-                            ? "🎉 New contract approved — payment required"
-                            : "New contract request in progress"
+                        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#14532d" : "#92400e", marginBottom: 3 }}>
+                          {pendingRenewal.status === "paid"
+                            ? "Next contract scheduled"
+                            : pendingRenewal.status === "pending_payment"
+                              ? "🎉 New contract approved — payment required"
+                              : "New contract request in progress"
                           }
                         </div>
-                        <div style={{ fontSize: 12, color: pendingRenewal.status === "pending_payment" ? "#15803d" : "#92400e", lineHeight: 1.6 }}>
+                        <div style={{ fontSize: 12, color: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#15803d" : "#92400e", lineHeight: 1.6 }}>
+                          {pendingRenewal.status === "paid" && (
+                            (() => {
+                              const nextTiming = getContractTiming(pendingRenewal);
+                              return (
+                                <>Your current contract stays active until {contract ? formatContractDate(getContractTiming(contract).end?.toISOString()) : "—"}. The next contract becomes effective on {formatContractDate(nextTiming.effectiveStart?.toISOString())} and runs until {formatContractDate(nextTiming.end?.toISOString())}.</>
+                              );
+                            })()
+                          )}
                           {pendingRenewal.status === "pending_payment" && (
                             <>CLBPrep has approved your new contract. Complete payment to activate your new seats.<br />Your current contract remains active until the new one is paid.</>
                           )}
@@ -3841,16 +3998,23 @@ export default function OrgPartnerAdmin() {
                       {allContracts.map((c: any, i: number) => {
                         const cfd = safeParseContractFormData(c);
                         const cTiming = getContractTiming(c);
-                        const isActive = c.$id === contract?.$id;
+                        const paidState = c.status === "paid" ? getPaidContractPhase(c) : null;
+                        const isCurrentServiceContract = c.status === "paid" && paidState?.phase === "active";
                         const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-                          paid:            { bg: "#dcfce7", text: "#15803d", label: "Active" },
                           pending_payment: { bg: "#fef9c3", text: "#854d0e", label: "Awaiting Payment" },
                           pending_admin:   { bg: "#dbeafe", text: "#1d4ed8", label: "Under Review" },
                           pending_org:     { bg: "#fef3c7", text: "#92400e", label: "Awaiting Signature" },
                           expired:         { bg: "#fee2e2", text: "#b91c1c", label: "Expired" },
                           cancelled:       { bg: "#f3f4f6", text: "#6b7280", label: "Cancelled" },
                         };
-                        const sc = statusColors[c.status] || { bg: "#f3f4f6", text: "#6b7280", label: c.status };
+                        const sc =
+                          c.status === "paid"
+                            ? paidState?.phase === "active"
+                              ? { bg: "#dcfce7", text: "#15803d", label: "Active" }
+                              : paidState?.phase === "scheduled"
+                                ? { bg: "#dbeafe", text: "#1d4ed8", label: "Scheduled" }
+                                : { bg: "#fee2e2", text: "#b91c1c", label: "Expired" }
+                            : statusColors[c.status] || { bg: "#f3f4f6", text: "#6b7280", label: c.status };
                         return (
                           <div key={c.$id}>
                             {/* Hidden template render so openAnyContractPdf can read its HTML */}
@@ -3869,14 +4033,14 @@ export default function OrgPartnerAdmin() {
                                 />
                               </div>
                             </div>
-                            <div style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isActive ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                            <div style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isCurrentServiceContract ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ fontSize: 12, fontWeight: 700, color: S.text }}>{cfd?.selectedPlan} seats — CAD ${cfd?.totalPrice}</span>
-                                  {isActive && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
+                                  {isCurrentServiceContract && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
                                 </div>
                                 <div style={{ fontSize: 11, color: S.textSoft }}>
-                                  {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
+                                  {cfd?.initialTerm || `${cfd?.months} month`} · Contract start: {formatContractDate(cfd?.startDate)} · Effective: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
                                   {cTiming.carryoverDays > 0 && ` · +${cTiming.carryoverDays} carryover day${cTiming.carryoverDays !== 1 ? "s" : ""}`}
                                 </div>
                               </div>

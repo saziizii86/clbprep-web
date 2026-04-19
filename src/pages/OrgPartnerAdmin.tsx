@@ -3097,8 +3097,6 @@ export default function OrgPartnerAdmin() {
                   </div>
                 </div>
 
-                </div>
-
                 {/* ── Pending renewal notice (shown when a new contract is under review) ── */}
                 {pendingRenewal && (
                   <div style={{ background: pendingRenewal.status === "pending_payment" ? "#f0fdf4" : "#fffbeb", border: `1px solid ${pendingRenewal.status === "pending_payment" ? "#86efac" : "#fde68a"}`, borderRadius: 16, padding: "20px 24px" }}>

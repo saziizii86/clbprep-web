@@ -1091,6 +1091,7 @@ export default function OrgPartnerAdmin() {
   const [orgUserId, setOrgUserId] = useState("");
   const [contract,        setContract]        = useState<OrgContract | null>(null);
   const [pendingRenewal,  setPendingRenewal]  = useState<OrgContract | null>(null);
+  const [allContracts,    setAllContracts]    = useState<OrgContract[]>([]);
   const [contractLoading, setContractLoading] = useState(false);
   const [showContractRequestFlow, setShowContractRequestFlow] = useState(false);
   const contractPdfRef = useRef<HTMLDivElement>(null);
@@ -1647,6 +1648,7 @@ export default function OrgPartnerAdmin() {
         return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
       });
       setContract(sorted[0] as unknown as OrgContract);
+      setAllContracts(sorted as unknown as OrgContract[]);
 
       // If the top contract is paid, check if there's also a pending renewal
       const top = sorted[0] as any;
@@ -1664,6 +1666,7 @@ export default function OrgPartnerAdmin() {
       try {
         const doc = await getContractByOrgId(orgUserId);
         setContract(doc);
+        setAllContracts(doc ? [doc] : []);
       } catch {}
     } finally {
       setContractLoading(false);
@@ -3114,6 +3117,7 @@ export default function OrgPartnerAdmin() {
                     Your contract is active and your {fd?.selectedPlan} seats are enabled.<br />
                     Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
                     Signed by <strong>{contract.orgSignerName}</strong> on {formatContractDate(contract.orgSignedAt)}<br />
+                    {(fd?.effectiveDate || fd?.startDate) && <>Service starts <strong>{formatContractDate(fd?.effectiveDate || fd?.startDate)}</strong><br /></>}
                     {(() => {
                       const start = fd?.effectiveDate || fd?.startDate;
                       const months = Number(fd?.months) || 1;
@@ -3214,6 +3218,52 @@ export default function OrgPartnerAdmin() {
                     btnPrimary={btnPrimary}
                     btnOutline={btnOutline}
                   />
+                )}
+
+                {/* ── All contracts history ── */}
+                {allContracts.length > 1 && (
+                  <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+                    <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>All Contracts</div>
+                      <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>All contract requests for your organization</div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      {allContracts.map((c: any, i: number) => {
+                        const cfd = parseContractFormData(c);
+                        const isActive = c.$id === contract?.$id;
+                        const statusColors: Record<string, { bg: string; text: string; label: string }> = {
+                          paid:            { bg: "#dcfce7", text: "#15803d", label: "Active" },
+                          pending_payment: { bg: "#fef9c3", text: "#854d0e", label: "Awaiting Payment" },
+                          pending_admin:   { bg: "#dbeafe", text: "#1d4ed8", label: "Under Review" },
+                          pending_org:     { bg: "#fef3c7", text: "#92400e", label: "Awaiting Signature" },
+                          expired:         { bg: "#fee2e2", text: "#b91c1c", label: "Expired" },
+                          cancelled:       { bg: "#f3f4f6", text: "#6b7280", label: "Cancelled" },
+                        };
+                        const sc = statusColors[c.status] || { bg: "#f3f4f6", text: "#6b7280", label: c.status };
+                        return (
+                          <div key={c.$id} style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isActive ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: S.text }}>{cfd?.selectedPlan} seats — CAD ${cfd?.totalPrice}</span>
+                                {isActive && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
+                              </div>
+                              <div style={{ fontSize: 11, color: S.textSoft }}>
+                                {cfd?.initialTerm || `${cfd?.months} month`} · Start: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Submitted: {formatContractDate(c.$createdAt)}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "3px 10px", borderRadius: 999 }}>{sc.label}</span>
+                              {c.status === "pending_payment" && (
+                                <button type="button" onClick={() => startStripeCheckout(c)} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>
+                                  Pay Now →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
               </div>
             );

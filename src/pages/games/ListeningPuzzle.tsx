@@ -159,6 +159,8 @@ function ListeningPuzzleInner({ config, onBack, onReset, voiceGender }: { config
   const [wordPool, setWordPool] = useState<string[]>([]);
   const [answer, setAnswer] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<"correct"|"wrong"|null>(null);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctionResult, setCorrectionResult] = useState<"correct"|"wrong"|null>(null);
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(config.duration * 60);
   const [gameOver, setGameOver] = useState(false);
@@ -271,13 +273,13 @@ useEffect(() => {
   }, [current?.sentence, isSpeaking, isLoading, voice, config.difficulty]);
 
   const addWord = (w: string, i: number) => {
-    if (feedback) return;
+    if ((feedback && !correcting) || correctionResult) return;
     const np = [...wordPool]; np.splice(i, 1);
     setWordPool(np); setAnswer(p => [...p, w]);
   };
 
   const removeWord = (i: number) => {
-    if (feedback) return;
+    if ((feedback && !correcting) || correctionResult) return;
     const w = answer[i]; const na = [...answer]; na.splice(i, 1);
     setAnswer(na); setWordPool(p => [...p, w]);
   };
@@ -286,8 +288,20 @@ useEffect(() => {
     const ua = answer.join(" ");
     const normalized = (s: string) => s.toLowerCase().replace(/[.!?,]+$/, "").trim();
     const ok = normalized(ua) === normalized(current.sentence);
-    setFeedback(ok ? "correct" : "wrong");
-    if (ok) setScore(s => s + 1);
+    if (correcting) {
+      setCorrectionResult(ok ? "correct" : "wrong");
+    } else {
+      setFeedback(ok ? "correct" : "wrong");
+      if (ok) setScore(s => s + 1);
+    }
+  };
+
+  const startCorrection = () => {
+    setFeedback(null);
+    setCorrecting(true);
+    setCorrectionResult(null);
+    setAnswer([]);
+    setWordPool(shuffle(current.words));
   };
 
   const next = () => {
@@ -299,6 +313,8 @@ useEffect(() => {
     setWordPool(shuffle(puzzles[ni].words));
     setAnswer([]);
     setFeedback(null);
+    setCorrecting(false);
+    setCorrectionResult(null);
   };
 
 
@@ -381,15 +397,26 @@ useEffect(() => {
 
         {/* Answer zone */}
         <div className={`min-h-[70px] rounded-2xl border-2 border-dashed p-4 mb-4 flex flex-wrap gap-2 items-start transition
-          ${feedback==="correct"?"bg-green-100 border-green-400":feedback==="wrong"?"bg-red-50 border-red-300":"bg-white border-gray-300"}`}>
+          ${correctionResult==="correct"?"bg-green-100 border-green-400":correctionResult==="wrong"?"bg-red-50 border-red-300":correcting?"bg-amber-50 border-amber-300":feedback==="correct"?"bg-green-100 border-green-400":feedback==="wrong"?"bg-red-50 border-red-300":"bg-white border-gray-300"}`}>
           {answer.length===0
             ? <span className="text-gray-300 text-sm">Tap words below to build the sentence…</span>
             : answer.map((w,i)=><button key={`a${i}`} onClick={()=>removeWord(i)} className="px-3 py-1.5 rounded-xl bg-teal-600 text-white text-sm font-semibold shadow-sm hover:bg-teal-700">{w} ×</button>)}
         </div>
 
-        {feedback && (
+        {/* Feedback / correction banners */}
+        {feedback && !correcting && (
           <div className={`rounded-xl px-4 py-3 mb-4 text-sm font-medium ${feedback==="correct"?"bg-green-100 text-green-800":"bg-red-50 text-red-700"}`}>
             {feedback==="correct" ? "✓ Perfect! You heard it correctly!" : `✗ Correct: "${current.sentence}"`}
+          </div>
+        )}
+        {correcting && !correctionResult && (
+          <div className="rounded-xl px-4 py-3 mb-4 text-sm font-medium bg-amber-50 text-amber-700 flex items-center gap-2">
+            ✏️ Re-arrange the words to form the correct sentence
+          </div>
+        )}
+        {correcting && correctionResult && (
+          <div className={`rounded-xl px-4 py-3 mb-4 text-sm font-medium ${correctionResult==="correct"?"bg-green-100 text-green-800":"bg-red-50 text-red-700"}`}>
+            {correctionResult==="correct" ? "✓ Well corrected! Great listening!" : `✗ Not quite. Correct: "${current.sentence}"`}
           </div>
         )}
 
@@ -398,15 +425,33 @@ useEffect(() => {
         </div>
 
         <div className="flex gap-3">
-          {!feedback ? (
+          {correcting ? (
+            correctionResult ? (
+              <button onClick={next} className="w-full py-3 rounded-xl bg-teal-600 text-white font-bold text-sm hover:bg-teal-700 flex items-center justify-center gap-2">
+                {idx+1<puzzles.length?"Next Puzzle":"See Results"} <ChevronRight className="w-4 h-4"/>
+              </button>
+            ) : (
+              <>
+                <button onClick={next} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Skip</button>
+                <button onClick={check} disabled={answer.length===0} className="flex-1 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm disabled:opacity-50 hover:bg-teal-700">Check Correction</button>
+              </>
+            )
+          ) : !feedback ? (
             <>
               <button onClick={() => { stopAudio(); onReset(); }} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4"/>New Session</button>
               <button onClick={check} disabled={answer.length===0} className="flex-1 py-3 rounded-xl bg-teal-600 text-white font-semibold text-sm disabled:opacity-50 hover:bg-teal-700">Check Answer</button>
             </>
-          ) : (
+          ) : feedback==="correct" ? (
             <button onClick={next} className="w-full py-3 rounded-xl bg-teal-600 text-white font-bold text-sm hover:bg-teal-700 flex items-center justify-center gap-2">
               {idx+1<puzzles.length?"Next Puzzle":"See Results"} <ChevronRight className="w-4 h-4"/>
             </button>
+          ) : (
+            <>
+              <button onClick={startCorrection} className="flex-1 py-3 rounded-xl border-2 border-teal-600 text-teal-600 font-semibold text-sm hover:bg-teal-50 transition">✏️ Try to Correct</button>
+              <button onClick={next} className="flex-1 py-3 rounded-xl bg-teal-600 text-white font-bold text-sm hover:bg-teal-700 flex items-center justify-center gap-2">
+                {idx+1<puzzles.length?"Next Puzzle":"See Results"} <ChevronRight className="w-4 h-4"/>
+              </button>
+            </>
           )}
         </div>
         <p className="text-center mt-3 text-xs text-gray-500">Score: <span className="font-bold text-teal-600">{score}/{idx+(feedback?1:0)}</span></p>

@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { ID, Query } from "appwrite";
 import {
   account,
   databases,
   DATABASE_ID,
   USERS_COLLECTION_ID,
-  functions,
 } from "../appwrite";
 import { loadSessionsFromDB } from "../services/progressService";
 import type { SessionRecord } from "./games/sessionTracker";
@@ -47,8 +46,6 @@ const PARTNER_ELIGIBILITY_COLLECTION_ID =
   (import.meta.env.VITE_PARTNER_ELIGIBILITY_COLLECTION_ID || "partner_eligibility").trim();
 const PARTNER_GROUPS_COLLECTION_ID =
   (import.meta.env.VITE_PARTNER_GROUPS_COLLECTION_ID || "partner_groups").trim();
-const ORG_CONTRACTS_COLLECTION_ID =
-  (import.meta.env.VITE_ORG_CONTRACTS_COLLECTION_ID || "org_contracts").trim();
 
 type Page = "dashboard" | "groups" | "learners" | "eligible" | "contract";
 type AddMode = "single" | "bulk";
@@ -220,204 +217,6 @@ function formatContractDate(value?: string): string {
   if (!Number.isFinite(t)) return "—";
   return new Date(t).toLocaleDateString("en-CA", { timeZone: "UTC" });
 }
-
-
-const MS_PER_DAY = 86400000;
-
-function parseDateOnlyUTC(value?: string | Date | null): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) {
-    if (!Number.isFinite(value.getTime())) return null;
-    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
-  }
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) {
-    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  }
-  const parsed = new Date(trimmed);
-  if (!Number.isFinite(parsed.getTime())) return null;
-  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-}
-
-function addUtcDays(date: Date, days: number): Date {
-  const next = new Date(date.getTime());
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-function diffUtcDays(start: Date, end: Date): number {
-  const startDate = parseDateOnlyUTC(start);
-  const endDate = parseDateOnlyUTC(end);
-  if (!startDate || !endDate) return 0;
-  return Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / MS_PER_DAY));
-}
-
-function getCustomDaysDiscount(days: number): number {
-  if (days >= 360) return 12;
-  if (days >= 180) return 8;
-  if (days >= 90) return 5;
-  return 0;
-}
-
-function safeParseContractFormData(contract: any): Record<string, any> {
-  try {
-    const parsed = parseContractFormData(contract);
-    if (parsed && typeof parsed === "object") return parsed as Record<string, any>;
-  } catch {}
-  try {
-    if (typeof contract?.formData === "string") {
-      const parsed = JSON.parse(contract.formData);
-      if (parsed && typeof parsed === "object") return parsed as Record<string, any>;
-    }
-    if (contract?.formData && typeof contract.formData === "object") {
-      return contract.formData as Record<string, any>;
-    }
-  } catch {}
-  return {};
-}
-
-function getStoredContractSnapshotHtml(contract: any): string {
-  const formData = safeParseContractFormData(contract);
-  const html = formData?.pdfSnapshotHtml || formData?.contractSnapshotHtml || formData?.frozenContractHtml || "";
-  return typeof html === "string" ? html.trim() : "";
-}
-
-function serializeContractFormData(originalContract: any, nextFormData: Record<string, any>): string {
-  if (typeof originalContract?.formData === "string") {
-    return JSON.stringify(nextFormData);
-  }
-  return JSON.stringify(nextFormData);
-}
-
-function getContractDurationDays(formData: Record<string, any>): number {
-  const customDays = Number(formData?.customDays ?? formData?.serviceDays);
-  if (Number.isFinite(customDays) && customDays >= 1) return Math.round(customDays);
-
-  const initialTerm = String(formData?.initialTerm || "").toLowerCase();
-  const daysMatch = initialTerm.match(/(\d+)\s*day/);
-  if (daysMatch) return Math.max(1, Number(daysMatch[1]) || 30);
-
-  const monthsMatch = initialTerm.match(/(\d+)\s*month/);
-  if (monthsMatch) return Math.max(1, Number(monthsMatch[1]) || 1) * 30;
-
-  const months = Number(formData?.months);
-  if (Number.isFinite(months) && months >= 1) return Math.round(months * 30);
-
-  return 30;
-}
-
-function getContractTiming(contract: any) {
-  const formData = safeParseContractFormData(contract);
-  const contractStart = parseDateOnlyUTC(formData?.startDate);
-  const effectiveStart = parseDateOnlyUTC(formData?.effectiveDate || formData?.startDate);
-  const baseDurationDays = getContractDurationDays(formData);
-  const carryoverDaysRaw = Number(formData?.carryoverDays ?? formData?.rolloverDays ?? 0);
-  const carryoverDays = Number.isFinite(carryoverDaysRaw) && carryoverDaysRaw > 0
-    ? Math.round(carryoverDaysRaw)
-    : 0;
-  const totalDurationDays = baseDurationDays + carryoverDays;
-  const end = effectiveStart ? addUtcDays(effectiveStart, totalDurationDays) : null;
-
-  return {
-    formData,
-    contractStart,
-    start: effectiveStart,
-    effectiveStart,
-    end,
-    baseDurationDays,
-    carryoverDays,
-    totalDurationDays,
-  };
-}
-
-function getTodayUtcDate(): Date {
-  return parseDateOnlyUTC(new Date()) || new Date();
-}
-
-function getPaidContractPhase(contract: any, todayArg?: Date | null) {
-  const timing = getContractTiming(contract);
-  const today = todayArg || getTodayUtcDate();
-
-  if (!timing.effectiveStart || !timing.end) {
-    return { timing, phase: "unknown" as const };
-  }
-  if (today.getTime() < timing.effectiveStart.getTime()) {
-    return { timing, phase: "scheduled" as const };
-  }
-  if (today.getTime() >= timing.end.getTime()) {
-    return { timing, phase: "expired" as const };
-  }
-  return { timing, phase: "active" as const };
-}
-
-function pickLatestPaidCoverageContract(contracts: any[], todayArg?: Date | null) {
-  const today = todayArg || getTodayUtcDate();
-  return [...contracts]
-    .filter((doc: any) => doc?.status === "paid")
-    .filter((doc: any) => {
-      const phase = getPaidContractPhase(doc, today).phase;
-      return phase === "active" || phase === "scheduled";
-    })
-    .sort((a: any, b: any) => {
-      const aTiming = getContractTiming(a);
-      const bTiming = getContractTiming(b);
-      const aEnd = aTiming.end?.getTime() || 0;
-      const bEnd = bTiming.end?.getTime() || 0;
-      if (aEnd !== bEnd) return bEnd - aEnd;
-      const aStart = aTiming.effectiveStart?.getTime() || 0;
-      const bStart = bTiming.effectiveStart?.getTime() || 0;
-      if (aStart !== bStart) return bStart - aStart;
-      return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
-    })[0] || null;
-}
-
-function isCandidateWithinRenewalWindow(baseContract: any, candidateContract: any) {
-  if (!baseContract || !candidateContract) return true;
-  const baseTiming = getContractTiming(baseContract);
-  const candidateTiming = getContractTiming(candidateContract);
-  if (!baseTiming.end || !candidateTiming.effectiveStart) return true;
-  const earliestAllowed = addUtcDays(baseTiming.end, -3);
-  return candidateTiming.effectiveStart.getTime() >= earliestAllowed.getTime();
-}
-
-function pickQueuedRenewalContract(contracts: any[], currentPaid: any, todayArg?: Date | null) {
-  const today = todayArg || getTodayUtcDate();
-
-  const scheduledPaid = [...contracts]
-    .filter((doc: any) => doc?.status === "paid")
-    .filter((doc: any) => getPaidContractPhase(doc, today).phase === "scheduled")
-    .filter((doc: any) => isCandidateWithinRenewalWindow(currentPaid, doc))
-    .sort((a: any, b: any) => {
-      const aStart = getContractTiming(a).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
-      const bStart = getContractTiming(b).effectiveStart?.getTime() || Number.MAX_SAFE_INTEGER;
-      if (aStart !== bStart) return aStart - bStart;
-      return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
-    })[0] || null;
-
-  const pendingPayment = [...contracts]
-    .filter((doc: any) => doc?.status === "pending_payment")
-    .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
-
-  const pendingReview = [...contracts]
-    .filter((doc: any) => ["pending_admin", "pending_org"].includes(String(doc?.status || "")))
-    .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
-
-  return scheduledPaid || pendingPayment || pendingReview || null;
-}
-
-function shouldFreezeContractSnapshot(contract: any, todayArg?: Date | null): boolean {
-  if (!contract) return false;
-
-  const status = String(contract.status || "").trim().toLowerCase();
-  if (["expired", "suspended", "cancelled"].includes(status)) return true;
-  if (status !== "paid") return false;
-
-  const phase = getPaidContractPhase(contract, todayArg).phase;
-  return phase === "expired";
-}
-
 
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -792,10 +591,10 @@ const QUOTE_PLANS = [
   { key: "100", label: "100 seats", price: 999 },
 ];
 const QUOTE_MONTHS = [
-  { value: 1,  label: "1 Month (30 Days)"  },
-  { value: 3,  label: "3 Months (90 Days)", discount: "Save 5%" },
-  { value: 6,  label: "6 Months (180 Days)", discount: "Save 8%" },
-  { value: 12, label: "12 Months (360 Days)",discount: "Save 12%" },
+  { value: 1,  label: "1 month"  },
+  { value: 3,  label: "3 months", discount: "Save 5%" },
+  { value: 6,  label: "6 months", discount: "Save 8%" },
+  { value: 12, label: "12 months",discount: "Save 12%" },
 ];
 const DISCOUNT: Record<number, number> = { 1: 0, 3: 5, 6: 8, 12: 12 };
 
@@ -812,308 +611,66 @@ function calcMonthlyPrice(seats: number): number {
   return Math.round(pricePerSeat(seats) * seats);
 }
 
-function formatPresetDurationLabel(months: number): string {
-  const safeMonths = Math.max(1, Number(months) || 1);
-  const safeDays = safeMonths * 30;
-  return `${safeMonths} Month${safeMonths > 1 ? "s" : ""} (${safeDays} Day${safeDays > 1 ? "s" : ""})`;
-}
-
-function formatStoredTermLabel(fd: any): string {
-  if (fd?.initialTerm) return String(fd.initialTerm);
-  if (Number.isFinite(Number(fd?.customDays)) && Number(fd.customDays) > 0) {
-    const days = Number(fd.customDays);
-    return `${days} Day${days > 1 ? "s" : ""}`;
-  }
-  if (Number.isFinite(Number(fd?.serviceDays)) && Number(fd.serviceDays) > 0) {
-    const days = Number(fd.serviceDays);
-    return `${days} Day${days > 1 ? "s" : ""}`;
-  }
-  return formatPresetDurationLabel(Number(fd?.months) || 1);
-}
-
 function ContractRequestFlow({
-  partnerName,
-  orgUserId,
-  adminName,
-  activeContract,
-  onSubmitted,
-  S,
-  titleFont,
-  inputStyle,
-  btnPrimary,
-  btnOutline,
+  partnerName, orgUserId, adminName, onSubmitted,
+  S, titleFont, inputStyle, btnPrimary, btnOutline,
 }: {
-  partnerName: string;
-  orgUserId: string;
-  adminName: string;
-  activeContract: OrgContract | null;
+  partnerName: string; orgUserId: string; adminName: string;
   onSubmitted: () => void;
-  S: any;
-  titleFont: string;
-  inputStyle: any;
-  btnPrimary: any;
-  btnOutline: any;
+  S: any; titleFont: string; inputStyle: any; btnPrimary: any; btnOutline: any;
 }) {
-  const MIN_SEATS = 15;
-  const MIN_CUSTOM_DAYS = 30;
   const [step, setStep] = React.useState<"quote" | "register">("quote");
 
+  // Quote state
+  const [plan,        setPlan]        = React.useState("20");
   const [customSeats, setCustomSeats] = React.useState<number | "">(20);
-  const [months, setMonths] = React.useState(1);
-  const [durationMode, setDurationMode] = React.useState<"preset" | "custom">("preset");
-  const [customDays, setCustomDays] = React.useState<number | "">(30);
-  const [seatsErr, setSeatsErr] = React.useState("");
-  const [durationErr, setDurationErr] = React.useState("");
+  const [months,      setMonths]      = React.useState(1);
+  const [seatsErr,    setSeatsErr]    = React.useState("");
 
-  const [orgName, setOrgName] = React.useState(partnerName || "");
-  const [orgAddress, setOrgAddress] = React.useState("");
-  const [billingName, setBillingName] = React.useState(adminName || "");
+  // Effective seat count — custom input overrides preset buttons
+  const effectiveSeats = typeof customSeats === "number" && customSeats >= 15 ? customSeats : 25;
+  // Snap plan key for downstream use
+  const planKey = String(effectiveSeats);
+
+  // Register state
+  const [orgName,      setOrgName]      = React.useState(partnerName || "");
+  const [orgAddress,   setOrgAddress]   = React.useState("");
+  const [billingName,  setBillingName]  = React.useState(adminName || "");
   const [billingEmail, setBillingEmail] = React.useState("");
   const [invoiceEmail, setInvoiceEmail] = React.useState("");
-  const [adminEmail, setAdminEmail] = React.useState("");
-  const [startDate, setStartDate] = React.useState("");
-  const [effectiveDate, setEffectiveDate] = React.useState("");
-  const autoRenew = false;
-  const billing = "Stripe Checkout";
-  const [notes, setNotes] = React.useState("");
-  const [agreed, setAgreed] = React.useState(false);
-  const [signerName, setSignerName] = React.useState(adminName || "");
-  const [signerTitle, setSignerTitle] = React.useState("");
-  const [signature, setSignature] = React.useState("");
-  const [signedDate, setSignedDate] = React.useState("");
-  const [submitting, setSubmitting] = React.useState(false);
-  const [submitErr, setSubmitErr] = React.useState("");
+  const [adminEmail,   setAdminEmail]   = React.useState("");
+  const [startDate,    setStartDate]    = React.useState("");
+  const [effectiveDate,setEffectiveDate]= React.useState("");
+  const [term,         setTerm]         = React.useState("Monthly");
+  const [autoRenew,    setAutoRenew]    = React.useState(false);
+  const [billing,      setBilling]      = React.useState("Stripe invoice");
+  const [notes,        setNotes]        = React.useState("");
+  const [agreed,       setAgreed]       = React.useState(false);
+  const [signerName,   setSignerName]   = React.useState(adminName || "");
+  const [signerTitle,  setSignerTitle]  = React.useState("");
+  const [signature,    setSignature]    = React.useState("");
+  const [signedDate,   setSignedDate]   = React.useState("");
+  const [submitting,   setSubmitting]   = React.useState(false);
+  const [submitErr,    setSubmitErr]    = React.useState("");
 
-  const activeTiming = React.useMemo(
-    () => (activeContract && activeContract.status === "paid" ? getContractTiming(activeContract) : null),
-    [activeContract]
-  );
-
-  const activeCoverageLabel = React.useMemo(() => {
-    if (!activeContract || activeContract.status !== "paid") return "current contract";
-    const phase = getPaidContractPhase(activeContract).phase;
-    return phase === "scheduled" ? "latest paid contract" : "current contract";
-  }, [activeContract]);
-
-  const effectiveSeats =
-    typeof customSeats === "number" && customSeats >= MIN_SEATS ? customSeats : 20;
-  const selectedDurationDays =
-    durationMode === "custom"
-      ? (typeof customDays === "number" && customDays >= MIN_CUSTOM_DAYS ? customDays : MIN_CUSTOM_DAYS)
-      : months * 30;
-  const selectedDiscount =
-    durationMode === "custom" ? getCustomDaysDiscount(selectedDurationDays) : (DISCOUNT[months] || 0);
+  const disc       = DISCOUNT[months] || 0;
   const baseMonthly = calcMonthlyPrice(effectiveSeats);
-  const monthlyAfterDiscount = Math.round(baseMonthly * (1 - selectedDiscount / 100));
-  const total = Math.round((monthlyAfterDiscount * selectedDurationDays) / 30);
-  const selectedDurationLabel =
-    durationMode === "custom"
-      ? `${selectedDurationDays} Day${selectedDurationDays > 1 ? "s" : ""}`
-      : formatPresetDurationLabel(months);
-
-  const todayDateValue = React.useMemo(
-    () => formatContractDate(getTodayUtcDate().toISOString()),
-    []
-  );
-
-  const contractStartDate = React.useMemo(
-    () => parseDateOnlyUTC(startDate),
-    [startDate]
-  );
-
-  const effectiveDateForValidation = React.useMemo(
-    () => parseDateOnlyUTC(effectiveDate || startDate),
-    [effectiveDate, startDate]
-  );
-
-  const recommendedRenewalStart = React.useMemo(() => {
-    if (!activeTiming?.end) return null;
-    return addUtcDays(activeTiming.end, -3);
-  }, [activeTiming]);
-
-  const recommendedEffectiveDate = React.useMemo(() => {
-    if (!activeTiming?.end) return null;
-    return recommendedRenewalStart || activeTiming.end;
-  }, [activeTiming, recommendedRenewalStart]);
-
-  const effectiveDateMinValue = React.useMemo(() => {
-    let minDate = contractStartDate || getTodayUtcDate();
-    if (recommendedRenewalStart && recommendedRenewalStart.getTime() > minDate.getTime()) {
-      minDate = recommendedRenewalStart;
-    }
-    return formatContractDate(minDate.toISOString());
-  }, [contractStartDate, recommendedRenewalStart]);
-
-  React.useEffect(() => {
-    if (!startDate) {
-      setStartDate(todayDateValue);
-    }
-  }, [startDate, todayDateValue]);
-
-  React.useEffect(() => {
-    if (effectiveDate || !startDate) return;
-    const startOnly = parseDateOnlyUTC(startDate);
-    let nextEffective = recommendedEffectiveDate || startOnly;
-    if (startOnly && nextEffective && startOnly.getTime() > nextEffective.getTime()) {
-      nextEffective = startOnly;
-    }
-    if (nextEffective) {
-      setEffectiveDate(formatContractDate(nextEffective.toISOString()));
-    }
-  }, [effectiveDate, recommendedEffectiveDate, startDate]);
-
-  const overlapDays = React.useMemo(() => {
-    if (!activeTiming?.end || !effectiveDateForValidation) return 0;
-    if (effectiveDateForValidation.getTime() >= activeTiming.end.getTime()) return 0;
-    return diffUtcDays(effectiveDateForValidation, activeTiming.end);
-  }, [activeTiming, effectiveDateForValidation]);
-
-  const carryoverDays = overlapDays > 0 && overlapDays <= 3 ? overlapDays : 0;
-
-  const projectedEndDate = React.useMemo(() => {
-    if (!effectiveDateForValidation) return null;
-    return addUtcDays(effectiveDateForValidation, selectedDurationDays + carryoverDays);
-  }, [effectiveDateForValidation, selectedDurationDays, carryoverDays]);
-
-  const effectiveDateErr = React.useMemo(() => {
-    if (!effectiveDateForValidation) return "";
-    if (contractStartDate && effectiveDateForValidation.getTime() < contractStartDate.getTime()) {
-      return "Effective date cannot be earlier than the contract start date.";
-    }
-    if (recommendedRenewalStart && effectiveDateForValidation.getTime() < recommendedRenewalStart.getTime()) {
-      return `Effective date cannot be earlier than ${formatContractDate(recommendedRenewalStart.toISOString())}.`;
-    }
-    return "";
-  }, [contractStartDate, effectiveDateForValidation, recommendedRenewalStart]);
-
-  const renewalNotice = React.useMemo(() => {
-    if (!activeTiming?.end) return null;
-    const expiryLabel = formatContractDate(activeTiming.end.toISOString());
-    const suggestedStartLabel = recommendedRenewalStart
-      ? formatContractDate(recommendedRenewalStart.toISOString())
-      : expiryLabel;
-
-    if (!effectiveDateForValidation) {
-      return {
-        tone: "info" as const,
-        title: "Paid contract on file",
-        body:
-          `Your paid service is currently covered until ${expiryLabel}. ` +
-          `You can sign the new contract today, but the effective date should normally be between ${suggestedStartLabel} and ${expiryLabel} so service continues without disruption. ` +
-          `If the effective date is within the last 3 days, those remaining days will be added to the new expiry date.`,
-      };
-    }
-
-    if (effectiveDateErr) {
-      return {
-        tone: "warn" as const,
-        title: "Adjust the effective date",
-        body: `${effectiveDateErr} Your ${activeCoverageLabel} expires on ${expiryLabel}.`,
-      };
-    }
-
-    if (overlapDays > 3) {
-      return {
-        tone: "warn" as const,
-        title: "This effective date overlaps existing paid service",
-        body:
-          `You already have paid service covered until ${expiryLabel}. ` +
-          `Only the last 3 remaining days can be carried forward. ` +
-          `To avoid unnecessary overlap, choose ${suggestedStartLabel} or later.`,
-      };
-    }
-
-    if (carryoverDays > 0) {
-      return {
-        tone: "success" as const,
-        title: `${carryoverDays} day${carryoverDays !== 1 ? "s" : ""} will be added to the new expiry date`,
-        body:
-          `Your ${activeCoverageLabel} expires on ${expiryLabel}. ` +
-          `Because this contract becomes effective within the final 3 days, those ${carryoverDays} remaining day${carryoverDays !== 1 ? "s" : ""} ` +
-          `will be added. New projected expiry: ${projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : "—"}.`,
-      };
-    }
-
-    return {
-      tone: "neutral" as const,
-      title: "Effective date is valid",
-      body: `Your ${activeCoverageLabel} expires on ${expiryLabel}. This effective date will continue service without disruption.`,
-    };
-  }, [activeCoverageLabel, activeTiming, carryoverDays, effectiveDateErr, effectiveDateForValidation, overlapDays, projectedEndDate, recommendedRenewalStart]);
-
-  const handleContinueToRegister = () => {
-    let hasError = false;
-
-    if (typeof customSeats !== "number" || customSeats < MIN_SEATS) {
-      setSeatsErr(`Minimum ${MIN_SEATS} seats required`);
-      hasError = true;
-    } else {
-      setSeatsErr("");
-    }
-
-    if (durationMode === "custom" && (typeof customDays !== "number" || customDays < MIN_CUSTOM_DAYS)) {
-      setDurationErr(`Minimum ${MIN_CUSTOM_DAYS} days required`);
-      hasError = true;
-    } else {
-      setDurationErr("");
-    }
-
-    if (hasError) return;
-    setStep("register");
-  };
+  const discounted  = Math.round(baseMonthly * (1 - disc / 100));
+  const total       = discounted * months;
 
   const handleSubmit = async () => {
-    if (durationMode === "custom" && (typeof customDays !== "number" || customDays < MIN_CUSTOM_DAYS)) {
-      setSubmitErr(`Custom duration must be at least ${MIN_CUSTOM_DAYS} days.`);
-      return;
-    }
-    if (!agreed) {
-      setSubmitErr("Please read and agree to the terms.");
-      return;
-    }
+    if (!agreed) { setSubmitErr("Please read and agree to the terms."); return; }
     if (!signerName.trim() || !signerTitle.trim() || !signature.trim() || !signedDate) {
-      setSubmitErr("Please fill in all signature fields.");
-      return;
+      setSubmitErr("Please fill in all signature fields."); return;
     }
-    if (!startDate) {
-      setSubmitErr("Please set a contract start date.");
-      return;
-    }
-    if (!effectiveDate) {
-      setSubmitErr("Please set a service effective date.");
-      return;
-    }
-    if (effectiveDateErr) {
-      setSubmitErr(effectiveDateErr);
-      return;
-    }
-
-    const startForSubmit = parseDateOnlyUTC(startDate);
-    const effectiveForSubmit = parseDateOnlyUTC(effectiveDate || startDate);
-    const carryoverForSubmit =
-      activeTiming?.end && effectiveForSubmit && effectiveForSubmit.getTime() < activeTiming.end.getTime()
-        ? Math.min(3, diffUtcDays(effectiveForSubmit, activeTiming.end))
-        : 0;
-
+    if (!startDate) { setSubmitErr("Please set a start date."); return; }
     setSubmitting(true);
     setSubmitErr("");
     try {
-      const termMonths = Math.max(1, Math.ceil(selectedDurationDays / 30));
-      const systemNoteParts = [
-        notes.trim(),
-        activeTiming?.end ? `${activeCoverageLabel[0].toUpperCase() + activeCoverageLabel.slice(1)} expires on ${formatContractDate(activeTiming.end.toISOString())}.` : "",
-        carryoverForSubmit > 0
-          ? `${carryoverForSubmit} carryover day${carryoverForSubmit !== 1 ? "s" : ""} should be added because the new contract starts within the final 3 days of the current term.`
-          : "",
-        overlapDays > 3
-          ? `Selected effective date overlaps existing paid service by ${overlapDays} days.`
-          : "",
-      ].filter(Boolean);
-
       const formData: OrgContractRequestData = {
-        selectedPlan: String(effectiveSeats),
-        selectedPlanPrice: monthlyAfterDiscount,
-        months: termMonths,
+        selectedPlan: planKey,
+        selectedPlanPrice: discounted,
+        months,
         totalPrice: total,
         organizationName: orgName,
         organizationAddress: orgAddress,
@@ -1123,37 +680,17 @@ function ContractRequestFlow({
         primaryAdminName: signerName,
         primaryAdminEmail: adminEmail || billingEmail,
         startDate,
-        effectiveDate,
-        initialTerm: selectedDurationLabel,
+        effectiveDate: effectiveDate || startDate,
+        initialTerm: months === 1 ? "Monthly" : `${months} months`,
         autoRenew,
         billingMethod: billing,
-        specialNotes: systemNoteParts.join("\n"),
+        specialNotes: notes,
         orgSignedAt: signedDate,
-        customDays: durationMode === "custom" ? selectedDurationDays : undefined,
-        serviceDays: selectedDurationDays,
-        carryoverDays: carryoverForSubmit || undefined,
-        currentContractExpiresOn: activeTiming?.end ? formatContractDate(activeTiming.end.toISOString()) : undefined,
-        adjustedProjectedEndDate: projectedEndDate ? formatContractDate(projectedEndDate.toISOString()) : undefined,
-      } as OrgContractRequestData & {
-        orgSignedAt: string;
-        customDays?: number;
-        serviceDays?: number;
-        carryoverDays?: number;
-        currentContractExpiresOn?: string;
-        adjustedProjectedEndDate?: string;
-      };
-
-      await createContractRequest(
-        orgUserId,
-        orgName,
-        formData,
-        signerName,
-        signerTitle,
-        signature,
-        signedDate
-      );
-
+      } as OrgContractRequestData & { orgSignedAt: string };
+      await createContractRequest(orgUserId, orgName, formData, signerName, signerTitle, signature, signedDate);
+      // Notify owner by email without blocking the submit flow
       try {
+        const { functions } = await import("../appwrite");
         void functions.createExecution(
           "69ae201700398cefccd9",
           JSON.stringify({
@@ -1168,20 +705,16 @@ function ContractRequestFlow({
               ``,
               `Details:`,
               `  Organization: ${orgName}`,
-              `  Plan: ${effectiveSeats} seats — CAD $${monthlyAfterDiscount}/month`,
-              `  Duration: ${selectedDurationLabel}`,
+              `  Plan: ${plan} seats — CAD $${discounted}/month`,
+              `  Duration: ${months} month${months > 1 ? "s" : ""}`,
               `  Total: CAD $${total}`,
-              `  Contract Start Date: ${startDate}`,
-              `  Effective Date: ${effectiveDate}`,
-              carryoverForSubmit > 0
-                ? `  Carryover Days: ${carryoverForSubmit} (new expiry extends automatically)`
-                : null,
+              `  Start Date: ${startDate}`,
               `  Signed by: ${signerName} (${signerTitle})`,
               ``,
               `Please log into your admin dashboard and review the contract under the Contracts tab.`,
               ``,
               `CLBPrep System`,
-            ].filter(Boolean).join("\n"),
+            ].join("\n"),
             attachments: "None",
           }),
           true
@@ -1198,535 +731,242 @@ function ContractRequestFlow({
     }
   };
 
+  /* ── Step 1: Quote ── */
+  if (step === "quote") return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ background: "linear-gradient(135deg,#1e3a5f,#12284b)", borderRadius: 16, padding: "16px 22px", color: "white", display: "flex", alignItems: "center", gap: 14 }}>
+        <FileCheck size={22} style={{ flexShrink: 0, opacity: 0.8 }} />
+        <div>
+          <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, marginBottom: 3 }}>Request a Quote</div>
+          <div style={{ fontSize: 11, opacity: .8, lineHeight: 1.6 }}>Select your seat plan and contract duration to see your pricing. If you're happy with the quote, you can proceed to register your contract.</div>
+        </div>
+      </div>
+
+      {/* Plan selector */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>1. Select Seats</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Choose a common plan or enter any number (minimum 15)</div>
+        </div>
+        <div style={{ padding: "16px 20px" }}>
+          {/* Quick-select preset buttons */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
+            {QUOTE_PLANS.map(p => {
+              const active = effectiveSeats === Number(p.key);
+              return (
+                <button key={p.key}
+                  onClick={() => { setCustomSeats(Number(p.key)); setSeatsErr(""); }}
+                  style={{
+                    border: `2px solid ${active ? "#6366f1" : S.border}`,
+                    borderRadius: 12, padding: "10px 8px", background: active ? "#eef2ff" : "#fff",
+                    cursor: "pointer", textAlign: "center", transition: "all .15s",
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: 14, color: active ? "#4338ca" : S.text }}>{p.key}</div>
+                  <div style={{ fontSize: 10, color: S.textSoft, marginTop: 1 }}>seats</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#4338ca" : S.text, marginTop: 4 }}>
+                    ${p.price}<span style={{ fontSize: 10, fontWeight: 400, color: S.textSoft }}>/mo</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom seat input */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#f8fafc", borderRadius: 12, border: `1px solid ${seatsErr ? "#fca5a5" : S.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.text, flexShrink: 0 }}>Custom seats:</div>
+            <input
+              type="number"
+              min={15}
+              max={10000}
+              value={customSeats}
+              onChange={e => {
+                const val = e.target.value === "" ? "" : parseInt(e.target.value);
+                setCustomSeats(val as number | "");
+                if (typeof val === "number" && val < 15) {
+                  setSeatsErr("Minimum 15 seats required");
+                } else {
+                  setSeatsErr("");
+                }
+              }}
+              placeholder="e.g. 75"
+              style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 800, fontSize: 16 }}
+            />
+            <div style={{ fontSize: 12, color: S.textSoft }}>
+              {typeof customSeats === "number" && customSeats >= 15
+                ? <span style={{ color: "#16a34a", fontWeight: 700 }}>
+                    ${pricePerSeat(customSeats).toFixed(2)}/seat · CAD ${calcMonthlyPrice(customSeats)}/month
+                  </span>
+                : <span style={{ color: S.textSoft }}>Enter a number ≥ 15</span>
+              }
+            </div>
+          </div>
+          {seatsErr && (
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6, paddingLeft: 4 }}>⚠ {seatsErr}</div>
+          )}
+
+          {/* Pricing tiers info */}
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "#f1f5f9", borderRadius: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: S.textSoft, marginBottom: 6, letterSpacing: ".06em" }}>VOLUME PRICING</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
+              {[
+                ["15–49",  "$12.00/seat"],
+                ["50–74",  "$10.50/seat"],
+                ["75–99",  "$10.00/seat"],
+                ["100+",   "$9.99/seat"],
+              ].map(([range, price]) => (
+                <div key={range} style={{ color: S.textSoft }}>
+                  <strong style={{ color: S.text }}>{range}</strong> · {price}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Duration selector */}
+      <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>2. Select Duration</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Longer commitments get a discount</div>
+        </div>
+        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+          {QUOTE_MONTHS.map(m => (
+            <button key={m.value} onClick={() => setMonths(m.value)}
+              style={{
+                border: `2px solid ${months === m.value ? "#6366f1" : S.border}`,
+                borderRadius: 14, padding: "12px 16px", background: months === m.value ? "#eef2ff" : "#fff",
+                cursor: "pointer", textAlign: "left", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>{m.label}</div>
+              {m.discount && (
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#16a34a", background: "#dcfce7", padding: "2px 8px", borderRadius: 999 }}>{m.discount}</div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Quote summary */}
+      <div style={{ background: "linear-gradient(135deg,#eef2ff,#f5f3ff)", border: "2px solid #c7d2fe", borderRadius: 16, padding: "20px 24px" }}>
+        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#3730a3", marginBottom: 14 }}>YOUR QUOTE</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 0", fontSize: 13 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>PLAN</div>
+            <div style={{ fontWeight: 700, color: S.text }}>{effectiveSeats} seats</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>MONTHLY</div>
+            <div style={{ fontWeight: 700, color: S.text }}>
+              CAD ${discounted}
+              {disc > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: "#16a34a", fontWeight: 800 }}>({disc}% off)</span>}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
+            <div style={{ fontWeight: 700, color: S.text }}>{months} month{months > 1 ? "s" : ""}</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
+            <div style={{ fontSize: 11, color: "#6366f1" }}>for {months} month{months > 1 ? "s" : ""} · {effectiveSeats} seats</div>
+          </div>
+          <button
+            onClick={() => {
+              if (typeof customSeats !== "number" || customSeats < 15) {
+                setSeatsErr("Minimum 15 seats required");
+                return;
+              }
+              setStep("register");
+            }}
+            style={{ ...btnPrimary, padding: "14px 28px", fontSize: 14 }}
+          >
+            Proceed with this quote →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── Step 2: Register contract ── */
   const templateData = {
-    organizationName: orgName,
-    organizationAddress: orgAddress,
-    billingContactName: billingName,
-    billingEmail,
-    invoiceEmail: invoiceEmail || billingEmail,
-    primaryAdminName: signerName,
-    primaryAdminEmail: adminEmail || billingEmail,
-    selectedPlan: String(effectiveSeats),
-    selectedPlanPrice: monthlyAfterDiscount,
-    startDate,
-    effectiveDate,
-    initialTerm: selectedDurationLabel,
-    autoRenew,
-    billingMethod: billing,
-    clbprepSignerName: "Soheila Azizi",
-    clbprepSignerTitle: "Azizi Online Learning Services",
+    organizationName: orgName, organizationAddress: orgAddress,
+    billingContactName: billingName, billingEmail, invoiceEmail: invoiceEmail || billingEmail,
+    primaryAdminName: signerName, primaryAdminEmail: adminEmail || billingEmail,
+    selectedPlan: planKey, selectedPlanPrice: discounted,
+    startDate, effectiveDate: effectiveDate || startDate,
+    initialTerm: months === 1 ? "Monthly" : `${months} months`,
+    autoRenew, billingMethod: billing,
+    clbprepSignerName: "Soheila Azizi", clbprepSignerTitle: "Azizi Online Learning Services",
     specialNotes: notes,
   };
 
-  if (step === "quote") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div
-          style={{
-            background: "linear-gradient(135deg,#1e3a5f,#12284b)",
-            borderRadius: 16,
-            padding: "16px 22px",
-            color: "white",
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-          }}
-        >
-          <FileCheck size={22} style={{ flexShrink: 0, opacity: 0.8 }} />
-          <div>
-            <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800, marginBottom: 3 }}>
-              Request a Quote
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.6 }}>
-              Select your seat plan and contract duration to see your pricing. If you are happy with the quote, you can proceed to register your contract.
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>1. Select Seats</div>
-            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
-              Choose a common plan or enter any number (minimum {MIN_SEATS})
-            </div>
-          </div>
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
-              {QUOTE_PLANS.map((p) => {
-                const presetSeats = Number(p.key);
-                const active = effectiveSeats === presetSeats;
-                return (
-                  <button
-                    key={p.key}
-                    onClick={() => {
-                      setCustomSeats(presetSeats);
-                      setSeatsErr("");
-                    }}
-                    style={{
-                      border: `2px solid ${active ? "#6366f1" : S.border}`,
-                      borderRadius: 12,
-                      padding: "10px 8px",
-                      background: active ? "#eef2ff" : "#fff",
-                      cursor: "pointer",
-                      textAlign: "center",
-                      transition: "all .15s",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800, fontSize: 14, color: active ? "#4338ca" : S.text }}>{p.key}</div>
-                    <div style={{ fontSize: 10, color: S.textSoft, marginTop: 1 }}>seats</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#4338ca" : S.text, marginTop: 4 }}>
-                      ${p.price}
-                      <span style={{ fontSize: 10, fontWeight: 400, color: S.textSoft }}>/mo</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 16px",
-                background: "#f8fafc",
-                borderRadius: 12,
-                border: `1px solid ${seatsErr ? "#fca5a5" : S.border}`,
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: 700, color: S.text, flexShrink: 0 }}>Custom seats:</div>
-              <input
-                type="number"
-                min={MIN_SEATS}
-                max={10000}
-                value={customSeats}
-                onChange={(e) => {
-                  const val = e.target.value === "" ? "" : parseInt(e.target.value, 10);
-                  setCustomSeats(val as number | "");
-                  if (typeof val === "number" && val < MIN_SEATS) {
-                    setSeatsErr(`Minimum ${MIN_SEATS} seats required`);
-                  } else {
-                    setSeatsErr("");
-                  }
-                }}
-                placeholder="e.g. 75"
-                style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 800, fontSize: 16 }}
-              />
-              <div style={{ fontSize: 12, color: S.textSoft }}>
-                {typeof customSeats === "number" && customSeats >= MIN_SEATS ? (
-                  <span style={{ color: "#16a34a", fontWeight: 700 }}>
-                    ${pricePerSeat(customSeats).toFixed(2)}/seat · CAD ${calcMonthlyPrice(customSeats)}/month
-                  </span>
-                ) : (
-                  <span style={{ color: S.textSoft }}>Enter a number ≥ {MIN_SEATS}</span>
-                )}
-              </div>
-            </div>
-            {seatsErr && (
-              <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6, paddingLeft: 4 }}>
-                ⚠ {seatsErr}
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, padding: "10px 14px", background: "#f1f5f9", borderRadius: 10 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: S.textSoft, marginBottom: 6, letterSpacing: ".06em" }}>
-                VOLUME PRICING
-              </div>
-              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
-                {[
-                  ["15–49", "$12.00/seat"],
-                  ["50–74", "$10.50/seat"],
-                  ["75–99", "$10.00/seat"],
-                  ["100+", "$9.99/seat"],
-                ].map(([range, price]) => (
-                  <div key={range} style={{ color: S.textSoft }}>
-                    <strong style={{ color: S.text }}>{range}</strong> · {price}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>2. Select Duration</div>
-            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
-              Longer commitments get a discount. Custom days start at {MIN_CUSTOM_DAYS} and receive the same discounts once they reach 90, 180, or 360 days.
-            </div>
-          </div>
-          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
-              {QUOTE_MONTHS.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => {
-                    setMonths(m.value);
-                    setDurationMode("preset");
-                    setDurationErr("");
-                  }}
-                  style={{
-                    border: `2px solid ${durationMode === "preset" && months === m.value ? "#6366f1" : S.border}`,
-                    borderRadius: 14,
-                    padding: "12px 16px",
-                    background: durationMode === "preset" && months === m.value ? "#eef2ff" : "#fff",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "all .15s",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: 13, color: S.text }}>{m.label}</div>
-                  {m.discount && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 800,
-                        color: "#16a34a",
-                        background: "#dcfce7",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                      }}
-                    >
-                      {m.discount}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            <div
-              onClick={() => setDurationMode("custom")}
-              style={{
-                border: `2px solid ${durationMode === "custom" ? "#6366f1" : S.border}`,
-                borderRadius: 14,
-                padding: "14px 16px",
-                background: durationMode === "custom" ? "#eef2ff" : "#fff",
-                transition: "all .15s",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: S.text }}>Custom days</div>
-                  <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
-                    Minimum {MIN_CUSTOM_DAYS} days. Discount starts at 90 days.
-                  </div>
-                </div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: selectedDiscount > 0 && durationMode === "custom" ? "#16a34a" : "#6366f1",
-                    background: selectedDiscount > 0 && durationMode === "custom" ? "#dcfce7" : "#eef2ff",
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                  }}
-                >
-                  {durationMode === "custom" && selectedDiscount > 0 ? `Save ${selectedDiscount}%` : "Flexible"}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "10px 14px",
-                  background: durationMode === "custom" ? "#ffffff" : "#f8fafc",
-                  borderRadius: 12,
-                  border: `1px solid ${durationErr ? "#fca5a5" : S.border}`,
-                }}
-              >
-                <label style={{ fontSize: 12, fontWeight: 700, color: S.text, whiteSpace: "nowrap" }}>
-                  Number of days:
-                </label>
-                <input
-                  type="number"
-                  min={MIN_CUSTOM_DAYS}
-                  max={730}
-                  value={customDays}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    const val = e.target.value === "" ? "" : parseInt(e.target.value, 10);
-                    setDurationMode("custom");
-                    setCustomDays(val as number | "");
-                    if (typeof val === "number" && val < MIN_CUSTOM_DAYS) {
-                      setDurationErr(`Minimum ${MIN_CUSTOM_DAYS} days required`);
-                    } else {
-                      setDurationErr("");
-                    }
-                  }}
-                  style={{ ...inputStyle, width: 100, textAlign: "center", fontWeight: 700 }}
-                />
-                <span style={{ fontSize: 12, color: S.textSoft }}>
-                  {typeof customDays === "number" && customDays >= MIN_CUSTOM_DAYS ? (
-                    <>
-                      ≈ {(customDays / 30).toFixed(1)} months ({customDays} days) ·
-                      <span style={{ color: "#16a34a", fontWeight: 700 }}> CAD ${Math.round((calcMonthlyPrice(effectiveSeats) * (1 - getCustomDaysDiscount(customDays) / 100) * customDays) / 30)} total</span>
-                    </>
-                  ) : (
-                    `Enter a number ≥ ${MIN_CUSTOM_DAYS}`
-                  )}
-                </span>
-              </div>
-              {durationErr && (
-                <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, marginTop: 6 }}>
-                  ⚠ {durationErr}
-                </div>
-              )}
-              <div style={{ marginTop: 10, fontSize: 11, color: S.textSoft }}>
-                30–89 days: no discount · 90–179 days: 5% off · 180–359 days: 8% off · 360+ days: 12% off
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: "linear-gradient(135deg,#eef2ff,#f5f3ff)",
-            border: "2px solid #c7d2fe",
-            borderRadius: 16,
-            padding: "20px 24px",
-          }}
-        >
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: "#3730a3", marginBottom: 14 }}>
-            YOUR QUOTE
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 0", fontSize: 13 }}>
-            <div>
-              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>PLAN</div>
-              <div style={{ fontWeight: 700, color: S.text }}>{effectiveSeats} seats</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>MONTHLY</div>
-              <div style={{ fontWeight: 700, color: S.text }}>
-                CAD ${monthlyAfterDiscount}
-                {selectedDiscount > 0 && (
-                  <span style={{ marginLeft: 6, fontSize: 11, color: "#16a34a", fontWeight: 800 }}>
-                    ({selectedDiscount}% off)
-                  </span>
-                )}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 800, marginBottom: 3 }}>DURATION</div>
-              <div style={{ fontWeight: 700, color: S.text }}>{selectedDurationLabel}</div>
-            </div>
-          </div>
-          <div
-            style={{
-              marginTop: 14,
-              paddingTop: 14,
-              borderTop: "1px solid #c7d2fe",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 800 }}>TOTAL</div>
-              <div style={{ fontSize: 26, fontWeight: 900, color: "#3730a3" }}>CAD ${total}</div>
-              <div style={{ fontSize: 11, color: "#6366f1" }}>
-                for {selectedDurationLabel} · {effectiveSeats} seats
-              </div>
-            </div>
-            <button onClick={handleContinueToRegister} style={{ ...btnPrimary, padding: "14px 28px", fontSize: 14 }}>
-              Proceed with this quote →
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Back to quote */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          onClick={() => setStep("quote")}
-          style={{ ...btnOutline, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}
-        >
+        <button onClick={() => setStep("quote")} style={{ ...btnOutline, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           ← Back to Quote
         </button>
         <div style={{ fontSize: 12, color: S.textSoft }}>
-          Quote: <strong>{effectiveSeats} seats · {selectedDurationLabel} · CAD ${total}</strong>
+          Quote: <strong>{effectiveSeats} seats · {months} month{months > 1 ? "s" : ""} · CAD ${total}</strong>
         </div>
       </div>
 
+      {/* Org info */}
       <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
         <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>
-            Organization Information
-          </div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
-            Fill in your organization's details for the contract
-          </div>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Organization Information</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Fill in your organization's details for the contract</div>
         </div>
         <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {[
-            { label: "Organization Legal Name *", val: orgName, set: setOrgName, span: 2 },
-            { label: "Organization Address", val: orgAddress, set: setOrgAddress, span: 2 },
-            { label: "Billing Contact Name *", val: billingName, set: setBillingName },
-            { label: "Billing Email *", val: billingEmail, set: setBillingEmail, type: "email" },
-            { label: "Invoice Email", val: invoiceEmail, set: setInvoiceEmail, type: "email" },
-            { label: "Admin Email", val: adminEmail, set: setAdminEmail, type: "email" },
-            { label: "Contract Start Date *", val: startDate, set: setStartDate, type: "date", min: todayDateValue },
-            { label: "Service Effective Date *", val: effectiveDate, set: setEffectiveDate, type: "date", min: effectiveDateMinValue },
-          ].map(({ label, val, set, span, type, min }) => (
+            { label: "Organization Legal Name *", val: orgName,      set: setOrgName,      span: 2 },
+            { label: "Organization Address",       val: orgAddress,   set: setOrgAddress,   span: 2 },
+            { label: "Billing Contact Name *",     val: billingName,  set: setBillingName   },
+            { label: "Billing Email *",             val: billingEmail, set: setBillingEmail, type: "email" },
+            { label: "Invoice Email",               val: invoiceEmail, set: setInvoiceEmail, type: "email" },
+            { label: "Admin Email",                 val: adminEmail,   set: setAdminEmail,   type: "email" },
+            { label: "Start Date *",                val: startDate,    set: setStartDate,    type: "date" },
+            { label: "Effective Date",              val: effectiveDate,set: setEffectiveDate,type: "date" },
+          ].map(({ label, val, set, span, type }) => (
             <div key={label} style={{ gridColumn: span === 2 ? "1 / -1" : undefined }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
-                {label}
-              </label>
-              <input
-                type={type || "text"}
-                value={val}
-                min={min}
-                onChange={(e) => set(e.target.value)}
-                style={{ ...inputStyle, width: "100%" }}
-              />
+              <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
+              <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
+                style={{ ...inputStyle, width: "100%" }} />
             </div>
           ))}
-
-          {effectiveDateErr && (
-            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#dc2626", fontWeight: 700 }}>
-              ⚠ {effectiveDateErr}
-            </div>
-          )}
-
-          {renewalNotice && (
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "flex-start",
-                  padding: "12px 14px",
-                  borderRadius: 12,
-                  border:
-                    renewalNotice.tone === "success"
-                      ? "1px solid #86efac"
-                      : renewalNotice.tone === "warn"
-                        ? "1px solid #fcd34d"
-                        : renewalNotice.tone === "info"
-                          ? "1px solid #bfdbfe"
-                          : `1px solid ${S.border}`,
-                  background:
-                    renewalNotice.tone === "success"
-                      ? "#f0fdf4"
-                      : renewalNotice.tone === "warn"
-                        ? "#fffbeb"
-                        : renewalNotice.tone === "info"
-                          ? "#eff6ff"
-                          : "#f8fafc",
-                }}
-              >
-                <AlertCircle
-                  size={16}
-                  style={{
-                    flexShrink: 0,
-                    marginTop: 2,
-                    color:
-                      renewalNotice.tone === "success"
-                        ? "#16a34a"
-                        : renewalNotice.tone === "warn"
-                          ? "#d97706"
-                          : renewalNotice.tone === "info"
-                            ? "#2563eb"
-                            : S.textSoft,
-                  }}
-                />
-                <div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color:
-                        renewalNotice.tone === "success"
-                          ? "#166534"
-                          : renewalNotice.tone === "warn"
-                            ? "#92400e"
-                            : renewalNotice.tone === "info"
-                              ? "#1d4ed8"
-                              : S.text,
-                      marginBottom: 3,
-                    }}
-                  >
-                    {renewalNotice.title}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1.6,
-                      color:
-                        renewalNotice.tone === "success"
-                          ? "#166534"
-                          : renewalNotice.tone === "warn"
-                            ? "#92400e"
-                            : renewalNotice.tone === "info"
-                              ? "#1e40af"
-                              : S.textSoft,
-                    }}
-                  >
-                    {renewalNotice.body}
-                  </div>
-                  {projectedEndDate && (
-                    <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, color: "#15803d" }}>
-                      Projected new expiry: {formatContractDate(projectedEndDate.toISOString())}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
-              Payment Method
-            </label>
-            <div
-              style={{
-                ...inputStyle,
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                background: "#f8fafc",
-                color: S.text,
-                fontWeight: 700,
-              }}
-            >
-              Stripe Checkout
-            </div>
-            <div style={{ fontSize: 11, color: S.textSoft, marginTop: 6 }}>
-              Organization contract payments are processed through Stripe Checkout.
-            </div>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Billing Method</label>
+            <select value={billing} onChange={e => setBilling(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
+              <option>Stripe invoice</option>
+              <option>Stripe payment link</option>
+              <option>Bank transfer</option>
+              <option>Other</option>
+            </select>
           </div>
-
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
+            <input type="checkbox" id="crf-autorenew" checked={autoRenew} onChange={e => setAutoRenew(e.target.checked)}
+              style={{ accentColor: S.blue, width: 15, height: 15 }} />
+            <label htmlFor="crf-autorenew" style={{ fontSize: 12, color: S.text, cursor: "pointer" }}>Auto-renew at end of term</label>
+          </div>
           <div style={{ gridColumn: "1 / -1" }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
-              Special Notes
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>Special Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
               placeholder="Any additional requests or notes…"
-              style={{ ...inputStyle, width: "100%", resize: "vertical" }}
-            />
+              style={{ ...inputStyle, width: "100%", resize: "vertical" }} />
           </div>
         </div>
       </div>
 
+      {/* Full contract to read */}
       <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
         <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>
-            Service Agreement
-          </div>
-          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>
-            Read the full contract below before agreeing and signing
-          </div>
+          <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>Service Agreement</div>
+          <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>Read the full contract below before agreeing and signing</div>
         </div>
         <div style={{ padding: "24px 28px", maxHeight: 500, overflowY: "auto", borderBottom: `1px solid ${S.border}` }}>
           <ContractTemplate
@@ -1739,26 +979,17 @@ function ContractRequestFlow({
           />
         </div>
 
+        {/* Agreement checkbox */}
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${S.border}` }}>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 12,
-              padding: "14px 16px",
-              background: agreed ? "#f0fdf4" : "#f8fafc",
-              border: `2px solid ${agreed ? "#4ade80" : S.border}`,
-              borderRadius: 12,
-              cursor: "pointer",
-              transition: "all .15s",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-              style={{ marginTop: 2, accentColor: "#16a34a", width: 16, height: 16, flexShrink: 0 }}
-            />
+          <label style={{
+            display: "flex", alignItems: "flex-start", gap: 12,
+            padding: "14px 16px",
+            background: agreed ? "#f0fdf4" : "#f8fafc",
+            border: `2px solid ${agreed ? "#4ade80" : S.border}`,
+            borderRadius: 12, cursor: "pointer", transition: "all .15s",
+          }}>
+            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)}
+              style={{ marginTop: 2, accentColor: "#16a34a", width: 16, height: 16, flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: S.text, marginBottom: 3 }}>
                 I have read and agree to the full Service Agreement above
@@ -1770,63 +1001,35 @@ function ContractRequestFlow({
           </label>
         </div>
 
+        {/* Signature — visible only after agreeing */}
         {agreed && (
           <div style={{ padding: "16px 20px" }}>
-            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>
-              Your Signature
-            </div>
+            <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 14 }}>Your Signature</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               {[
-                { label: "Full Name *", val: signerName, set: setSignerName },
-                { label: "Title / Role *", val: signerTitle, set: setSignerTitle },
-                { label: "Electronic Signature *", val: signature, set: setSignature, italic: true },
-                { label: "Date *", val: signedDate, set: setSignedDate, type: "date" },
+                { label: "Full Name *",              val: signerName,   set: setSignerName },
+                { label: "Title / Role *",            val: signerTitle,  set: setSignerTitle },
+                { label: "Electronic Signature *",    val: signature,    set: setSignature,  italic: true },
+                { label: "Date *",                    val: signedDate,   set: setSignedDate, type: "date" },
               ].map(({ label, val, set, type, italic }) => (
                 <div key={label}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>
-                    {label}
-                  </label>
-                  <input
-                    type={type || "text"}
-                    value={val}
-                    onChange={(e) => set(e.target.value)}
+                  <label style={{ fontSize: 11, fontWeight: 700, color: S.text, display: "block", marginBottom: 5 }}>{label}</label>
+                  <input type={type || "text"} value={val} onChange={e => set(e.target.value)}
                     placeholder={label.includes("Signature") ? "Type your full legal name" : undefined}
-                    style={{
-                      ...inputStyle,
-                      width: "100%",
-                      ...(italic ? { fontStyle: "italic", fontFamily: "Georgia, serif" } : {}),
-                    }}
-                  />
+                    style={{ ...inputStyle, width: "100%", ...(italic ? { fontStyle: "italic", fontFamily: "Georgia, serif" } : {}) }} />
                 </div>
               ))}
             </div>
 
             {submitErr && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 14px",
-                  background: "#fef2f2",
-                  border: "1px solid #fecaca",
-                  borderRadius: 10,
-                  fontSize: 12,
-                  color: "#dc2626",
-                  fontWeight: 600,
-                  marginBottom: 14,
-                }}
-              >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, fontSize: 12, color: "#dc2626", fontWeight: 600, marginBottom: 14 }}>
                 ⚠ {submitErr}
               </div>
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                style={{ ...btnPrimary, opacity: submitting ? 0.7 : 1, padding: "12px 28px", fontSize: 13 }}
-              >
+              <button onClick={handleSubmit} disabled={submitting}
+                style={{ ...btnPrimary, opacity: submitting ? 0.7 : 1, padding: "12px 28px", fontSize: 13 }}>
                 {submitting ? "Submitting…" : "Submit Contract to CLBPrep →"}
               </button>
             </div>
@@ -1837,10 +1040,8 @@ function ContractRequestFlow({
   );
 }
 
-
 export default function OrgPartnerAdmin() {
   const nav = useNavigate();
-  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [adminName, setAdminName] = useState("");
@@ -1848,9 +1049,6 @@ export default function OrgPartnerAdmin() {
   const [contractSeats, setContractSeats] = useState(0);
   const [orgUserId, setOrgUserId] = useState("");
   const [contract,        setContract]        = useState<OrgContract | null>(null);
-  const [pendingRenewal,  setPendingRenewal]  = useState<OrgContract | null>(null);
-  const [renewalGuardContract, setRenewalGuardContract] = useState<OrgContract | null>(null);
-  const [allContracts,    setAllContracts]    = useState<OrgContract[]>([]);
   const [contractLoading, setContractLoading] = useState(false);
   const [showContractRequestFlow, setShowContractRequestFlow] = useState(false);
   const contractPdfRef = useRef<HTMLDivElement>(null);
@@ -1996,38 +1194,6 @@ export default function OrgPartnerAdmin() {
 
     setLearners(onlyLearners as unknown as Learner[]);
   }, [partnerName, eligible]);
-
-  const loadContractRef = useRef<() => Promise<void>>(async () => {});
-
-  useEffect(() => {
-    if (!partnerName || !orgUserId) return;
-    const checkout = searchParams.get("checkout");
-    if (!checkout) return;
-
-    setPage("contract");
-
-    if (checkout === "success") {
-      const sessionId = searchParams.get("session_id") || "";
-      const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
-
-      (async () => {
-        if (sessionId && STRIPE_FUNCTION_ID) {
-          try {
-            await functions.createExecution(
-              STRIPE_FUNCTION_ID,
-              JSON.stringify({ sessionId }),
-              false,
-              "/verify-org-payment",
-              "POST"
-            );
-          } catch (e) {
-            console.error("verify-org-payment failed:", e);
-          }
-        }
-        await loadContractRef.current();
-      })();
-    }
-  }, [partnerName, orgUserId, searchParams]);
 
   useEffect(() => {
     if (!partnerName) return;
@@ -2360,142 +1526,43 @@ export default function OrgPartnerAdmin() {
     }
   };
 
+  const handleRemove = async (u: EligibleUser) => {
+    if (!window.confirm(`Permanently remove ${u.email} from eligible users? This cannot be undone.`)) return;
+    try {
+      // Deactivate their CLBPrep account first if they have one
+      const learnerRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
+        Query.equal("email", u.email),
+        Query.limit(1),
+      ]);
+      if (learnerRes.documents.length) {
+        await databases.updateDocument(DATABASE_ID, USERS_COLLECTION_ID, learnerRes.documents[0].$id, {
+          subscriptionStatus: "inactive",
+          subscriptionPlan: "basic",
+          subscriptionSource: null,
+        });
+      }
+      // Delete the eligibility record entirely
+      await databases.deleteDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, u.$id);
+      setSelectedEligible(null);
+      await Promise.all([loadEligible(), loadLearners()]);
+      showToast(`${u.email} removed from eligible users.`);
+    } catch (e: any) {
+      showToast(e?.message || "Failed to remove user.", false);
+    }
+  };
+
   const loadContract = useCallback(async () => {
     if (!orgUserId) return;
     setContractLoading(true);
     try {
-      let docs: any[] = [];
-
-      const byOrgId = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
-        Query.equal("orgId", orgUserId),
-        Query.orderDesc("$createdAt"),
-        Query.limit(50),
-      ]);
-      docs = byOrgId.documents;
-
-      if (!docs.length && partnerName) {
-        const byPartner = await databases.listDocuments(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, [
-          Query.equal("orgName", partnerName),
-          Query.orderDesc("$createdAt"),
-          Query.limit(50),
-        ]);
-        docs = byPartner.documents;
-      }
-
-      if (!docs.length) {
-        setContract(null);
-        setAllContracts([]);
-        setPendingRenewal(null);
-        setRenewalGuardContract(null);
-        return;
-      }
-
-      const today = getTodayUtcDate();
-      const paidContracts = docs.filter((doc: any) => doc.status === "paid");
-
-      const currentPaid = [...paidContracts]
-        .filter((doc: any) => getPaidContractPhase(doc, today).phase === "active")
-        .sort((a: any, b: any) => {
-          const aTiming = getContractTiming(a);
-          const bTiming = getContractTiming(b);
-          const aStart = aTiming.effectiveStart?.getTime() || 0;
-          const bStart = bTiming.effectiveStart?.getTime() || 0;
-          if (aStart !== bStart) return bStart - aStart;
-          return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
-        })[0] || null;
-
-      const latestPaidCoverage = pickLatestPaidCoverageContract(docs, today);
-      const queuedRenewal = currentPaid ? pickQueuedRenewalContract(docs, currentPaid, today) : null;
-
-      const pendingPayment = docs
-        .filter((doc: any) => doc.status === "pending_payment")
-        .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
-
-      const pendingReview = docs
-        .filter((doc: any) => ["pending_admin", "pending_org"].includes(doc.status))
-        .sort((a: any, b: any) => new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime())[0] || null;
-
-      const expiredOrOther = [...docs].sort((a: any, b: any) => {
-        const aTiming = getContractTiming(a);
-        const bTiming = getContractTiming(b);
-        return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
-      })[0] || null;
-
-      const displayContract =
-        currentPaid ||
-        latestPaidCoverage ||
-        pendingPayment ||
-        pendingReview ||
-        expiredOrOther ||
-        null;
-
-      const sortedContracts = [...docs].sort((a: any, b: any) => {
-        const score = (doc: any) => {
-          if (doc.status === "paid") {
-            const phase = getPaidContractPhase(doc, today).phase;
-            if (phase === "active") return 0;
-            if (phase === "scheduled") return 1;
-            if (phase === "expired") return 5;
-            return 6;
-          }
-          if (doc.status === "pending_payment") return 2;
-          if (doc.status === "pending_admin") return 3;
-          if (doc.status === "pending_org") return 4;
-          if (doc.status === "expired") return 6;
-          if (doc.status === "cancelled") return 7;
-          return 8;
-        };
-
-        const sa = score(a);
-        const sb = score(b);
-        if (sa !== sb) return sa - sb;
-
-        const aTiming = getContractTiming(a);
-        const bTiming = getContractTiming(b);
-
-        if (a.status === "paid" && b.status === "paid") {
-          const aStart = aTiming.effectiveStart?.getTime() || 0;
-          const bStart = bTiming.effectiveStart?.getTime() || 0;
-          if (sa === 0 || sa === 1) {
-            if (aStart !== bStart) return bStart - aStart;
-            return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
-          }
-          return (bTiming.end?.getTime() || 0) - (aTiming.end?.getTime() || 0);
-        }
-
-        return new Date(b.$createdAt).getTime() - new Date(a.$createdAt).getTime();
-      });
-
-      const uniqueContracts = Array.from(
-        new Map(sortedContracts.filter(Boolean).map((item: any) => [item.$id, item])).values()
-      ) as unknown as OrgContract[];
-
-      setContract(displayContract as OrgContract | null);
-      setAllContracts(uniqueContracts);
-      setRenewalGuardContract((latestPaidCoverage || currentPaid || null) as OrgContract | null);
-
-      const nextQueuedRenewal =
-        currentPaid
-          ? queuedRenewal
-          : (pendingPayment || pendingReview || null);
-
-      setPendingRenewal((nextQueuedRenewal || null) as OrgContract | null);
+      const doc = await getContractByOrgId(orgUserId);
+      setContract(doc);
     } catch (e) {
       console.error("Failed to load contract:", e);
-      try {
-        const doc = await getContractByOrgId(orgUserId);
-        setContract(doc);
-        setAllContracts(doc ? [doc] : []);
-        setPendingRenewal(null);
-        setRenewalGuardContract(doc && doc.status === "paid" ? doc : null);
-      } catch {}
     } finally {
       setContractLoading(false);
     }
-  }, [orgUserId, partnerName]);
-
-  // Keep ref in sync so the checkout useEffect (defined earlier) can call it safely
-  useEffect(() => { loadContractRef.current = loadContract; }, [loadContract]);
+  }, [orgUserId]);
 
   useEffect(() => {
     if (orgUserId) loadContract();
@@ -2510,91 +1577,8 @@ export default function OrgPartnerAdmin() {
     }
   }, [contract?.$id, contract?.status, contract]);
 
-  // Map of contract $id → rendered HTML div (for per-contract PDF view)
-  const contractPdfRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const snapshotSavingRef = useRef<Set<string>>(new Set());
-
-  const persistFrozenContractSnapshot = useCallback(async (contractDoc: any, html: string) => {
-    const contractId = String(contractDoc?.$id || "").trim();
-    if (!contractId || !html.trim()) return;
-    if (snapshotSavingRef.current.has(contractId)) return;
-
-    const parsed = safeParseContractFormData(contractDoc);
-    if (getStoredContractSnapshotHtml(contractDoc)) return;
-
-    snapshotSavingRef.current.add(contractId);
-    try {
-      const nextFormData = {
-        ...parsed,
-        pdfSnapshotHtml: html,
-        pdfSnapshotAt: new Date().toISOString(),
-        pdfSnapshotVersion: 1,
-      };
-
-      await databases.updateDocument(DATABASE_ID, ORG_CONTRACTS_COLLECTION_ID, contractId, {
-        formData: serializeContractFormData(contractDoc, nextFormData),
-      });
-
-      setAllContracts((prev) => prev.map((item: any) => item?.$id === contractId
-        ? { ...item, formData: JSON.stringify(nextFormData) }
-        : item));
-      setContract((prev: any) => prev?.$id === contractId
-        ? { ...prev, formData: JSON.stringify(nextFormData) }
-        : prev);
-    } catch (e) {
-      console.warn("Failed to freeze contract snapshot:", e);
-    } finally {
-      snapshotSavingRef.current.delete(contractId);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!allContracts.length) return;
-
-    const timer = window.setTimeout(() => {
-      const today = getTodayUtcDate();
-      allContracts.forEach((item: any) => {
-        if (!item?.$id) return;
-        if (!shouldFreezeContractSnapshot(item, today)) return;
-        if (getStoredContractSnapshotHtml(item)) return;
-
-        const el = contractPdfRefs.current.get(item.$id);
-        const html = el?.innerHTML?.trim() || "";
-        if (!html) return;
-
-        void persistFrozenContractSnapshot(item, html);
-      });
-    }, 120);
-
-    return () => window.clearTimeout(timer);
-  }, [allContracts, persistFrozenContractSnapshot]);
-
-  const openAnyContractPdf = useCallback((c: OrgContract, autoPrint = false) => {
-    const storedHtml = getStoredContractSnapshotHtml(c);
-    const el = contractPdfRefs.current.get((c as any).$id);
-    const liveHtml = el?.innerHTML?.trim() || "";
-    const html = shouldFreezeContractSnapshot(c)
-      ? (storedHtml || liveHtml)
-      : (liveHtml || storedHtml);
-    if (!html) { window.alert("Contract preview is not ready yet."); return; }
-    const fullHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
-      <title>CLBPrep Contract</title>
-      <style>html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,Helvetica,sans-serif;padding:32px;color:#132238}*{box-sizing:border-box}@page{size:auto;margin:18mm}@media print{html,body{background:#fff}body{padding:0}}</style>
-      </head><body>${html}</body></html>`;
-    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank", "width=1100,height=900");
-    if (!win) { URL.revokeObjectURL(url); window.alert("Please allow pop-ups."); return; }
-    if (autoPrint) { win.onload = () => { win.focus(); win.print(); setTimeout(() => URL.revokeObjectURL(url), 60000); }; }
-    else { setTimeout(() => URL.revokeObjectURL(url), 60000); }
-  }, []);
-
   const openContractPdfWindow = useCallback((autoPrint = false) => {
-    const storedHtml = contract ? getStoredContractSnapshotHtml(contract) : "";
-    const liveHtml = contractPdfRef.current?.innerHTML?.trim() || "";
-    const html = shouldFreezeContractSnapshot(contract)
-      ? (storedHtml || liveHtml)
-      : (liveHtml || storedHtml);
+    const html = contractPdfRef.current?.innerHTML;
     if (!html) {
       window.alert("Contract preview is not ready yet.");
       return;
@@ -2650,15 +1634,16 @@ export default function OrgPartnerAdmin() {
     }
 
     cleanup();
-  }, [contract]);
+  }, []);
 
   const startStripeCheckout = useCallback(async (currentContract: OrgContract) => {
     try {
       const currentFd = parseContractFormData(currentContract);
+      const { functions } = await import("../appwrite");
       const STRIPE_FUNCTION_ID = (import.meta.env.VITE_APPWRITE_STRIPE_FUNCTION_ID || "").trim();
 
       if (!STRIPE_FUNCTION_ID) {
-        window.alert("Stripe function ID is missing in your production environment.");
+        window.alert("VITE_APPWRITE_STRIPE_FUNCTION_ID is missing.");
         return;
       }
 
@@ -2678,25 +1663,13 @@ export default function OrgPartnerAdmin() {
         "POST"
       );
 
-      let result: any = {};
-      try {
-        result = JSON.parse(execution.responseBody || "{}");
-      } catch {
-        result = {};
-      }
-
+      const result = JSON.parse(execution.responseBody || "{}");
       if (result.url) {
-        window.location.assign(result.url);
-        return;
+        window.location.href = result.url;
+      } else {
+        window.alert("Could not start checkout: " + (result.error || "Unknown error"));
       }
-
-      console.error("Stripe checkout did not return a URL.", {
-        responseStatusCode: execution.responseStatusCode,
-        responseBody: execution.responseBody,
-      });
-      window.alert("Could not start checkout. The Stripe function did not return a checkout URL.");
     } catch (e: any) {
-      console.error("Stripe checkout error:", e);
       window.alert("Checkout failed: " + (e?.message || "Please try again."));
     }
   }, [orgUserId, partnerName]);
@@ -2725,10 +1698,10 @@ export default function OrgPartnerAdmin() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={() => openAnyContractPdf(currentContract, false)} style={btnOutline}>
+            <button type="button" onClick={() => openContractPdfWindow(false)} style={btnOutline}>
               <FolderOpen size={14} /> {options?.previewLabel || "View PDF"}
             </button>
-            <button type="button" onClick={() => openAnyContractPdf(currentContract, true)} style={btnPrimary}>
+            <button type="button" onClick={() => openContractPdfWindow(true)} style={btnPrimary}>
               <Download size={14} /> Download / Print PDF
             </button>
           </div>
@@ -2750,7 +1723,7 @@ export default function OrgPartnerAdmin() {
         </div>
       </div>
     );
-  }, [btnOutline, btnPrimary, openAnyContractPdf]);
+  }, [btnOutline, btnPrimary, openContractPdfWindow]);
 
   const openPage = (next: Page) => {
     setPage(next);
@@ -3078,30 +2051,10 @@ export default function OrgPartnerAdmin() {
             )}
           </button>
 
-          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: 0.3, padding: "16px 8px 8px" }}>REPORTS</div>
-          <button
-            onClick={() => setPage("reports" as any)}
-            className="opa-nav"
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              border: "none",
-              background: page === "reports" ? "rgba(99,102,241,.22)" : "transparent",
-              color: page === "reports" ? "#a5b4fc" : "rgba(255,255,255,.62)",
-              borderRadius: 12,
-              padding: "11px 12px",
-              fontSize: 14,
-              fontWeight: 700,
-              fontFamily: "inherit",
-              cursor: "pointer",
-              textAlign: "left",
-            }}
-          >
-            <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><FileText size={16} /></span>
-            Export Reports
-          </button>
+          {/* TEMPORARILY HIDDEN — Export Reports nav
+          <div style={{ fontSize: 10, ... }}>REPORTS</div>
+          <button onClick={() => setPage("reports" as any)}>Export Reports</button>
+          */}
         </div>
 
         <div style={{ padding: 14, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -3135,7 +2088,7 @@ export default function OrgPartnerAdmin() {
               {page === "learners" && selectedLearner && (selectedLearner.name || selectedLearner.email)}
               {page === "eligible" && !selectedEligible && "Eligible Users"}
               {page === "eligible" && selectedEligible && (selectedEligible.name || selectedEligible.email)}
-              {(page as any) === "reports" && "Export Reports"}
+              {false && (page as any) === "reports" && "Export Reports"}
               {page === "contract" && "Organization Contract"}
             </div>
           </div>
@@ -3352,52 +2305,38 @@ export default function OrgPartnerAdmin() {
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 18 }}>
                 {groupCards.map(({ group, members, activeThisWeek, lessActive, totalSessions, pct }) => (
-                  <div key={group.$id} style={{ position: "relative" }}>
-                    <button
-                      onClick={() => setSelectedGroup(group)}
-                      className="opa-hover-card"
-                      style={{ ...shellCard, padding: 20, textAlign: "left", cursor: "pointer", fontFamily: "inherit", position: "relative", overflow: "hidden", width: "100%" }}
-                    >
-                      <div style={{ position: "absolute", insetInline: 0, top: 0, height: 4, background: group.color }} />
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
-                        <div style={{ width: 46, height: 46, borderRadius: 14, background: `${group.color}18`, color: group.color, display: "grid", placeItems: "center", fontSize: 22 }}>{group.emoji}</div>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontFamily: titleFont, fontSize: 22, fontWeight: 900, color: group.color }}>{members.length}/{group.seats}</div>
-                            <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700 }}>seats used</div>
-                            <div style={{ fontSize: 11, color: group.color, fontWeight: 800, marginTop: 2 }}>{pct}% full</div>
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setGroupToDelete(group);
-                            }}
-                            style={{ width: 30, height: 30, borderRadius: 9, border: "none", background: "#fee2e2", color: S.red, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 2 }}
-                            title="Delete group"
-                            aria-label={`Delete ${group.name}`}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                  <button
+                    key={group.$id}
+                    onClick={() => setSelectedGroup(group)}
+                    className="opa-hover-card"
+                    style={{ ...shellCard, padding: 20, textAlign: "left", cursor: "pointer", fontFamily: "inherit", position: "relative", overflow: "hidden" }}
+                  >
+                    <div style={{ position: "absolute", insetInline: 0, top: 0, height: 4, background: group.color }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                      <div style={{ width: 46, height: 46, borderRadius: 14, background: `${group.color}18`, color: group.color, display: "grid", placeItems: "center", fontSize: 22 }}>{group.emoji}</div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: titleFont, fontSize: 22, fontWeight: 900, color: group.color }}>{members.length}/{group.seats}</div>
+                        <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700 }}>seats used</div>
+                        <div style={{ fontSize: 11, color: group.color, fontWeight: 800, marginTop: 2 }}>{pct}% full</div>
                       </div>
-                      <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800 }}>{group.name}</div>
-                      <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.55, marginTop: 6 }}>{group.desc || "No description"}</div>
-                      <div style={{ fontSize: 12, color: group.color, fontWeight: 800, marginTop: 8 }}>{group.schedule}</div>
+                    </div>
+                    <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800 }}>{group.name}</div>
+                    <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.55, marginTop: 6 }}>{group.desc || "No description"}</div>
+                    <div style={{ fontSize: 12, color: group.color, fontWeight: 800, marginTop: 8 }}>{group.schedule}</div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 16 }}>
-                        {[
-                          { label: "Active", value: activeThisWeek, color: S.green },
-                          { label: "Less active", value: lessActive, color: lessActive ? S.red : S.green },
-                          { label: "Sessions", value: totalSessions, color: S.blue },
-                        ].map((item) => (
-                          <div key={item.label} style={{ background: "#f8fbff", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-                            <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 900, color: item.color }}>{item.value}</div>
-                            <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700, marginTop: 2 }}>{item.label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </button>
-                  </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 16 }}>
+                      {[
+                        { label: "Active", value: activeThisWeek, color: S.green },
+                        { label: "Less active", value: lessActive, color: lessActive ? S.red : S.green },
+                        { label: "Sessions", value: totalSessions, color: S.blue },
+                      ].map((item) => (
+                        <div key={item.label} style={{ background: "#f8fbff", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+                          <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 900, color: item.color }}>{item.value}</div>
+                          <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700, marginTop: 2 }}>{item.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </button>
                 ))}
 
                 <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} className="opa-hover-card" style={{ ...shellCard, border: `1.5px dashed ${S.border}`, padding: 20, minHeight: 244, display: "grid", placeItems: "center", textAlign: "center", cursor: "pointer", fontFamily: "inherit" }}>
@@ -3857,6 +2796,7 @@ export default function OrgPartnerAdmin() {
                                 ) : (
                                   <button onClick={() => handleReactivate(u)} style={{ padding: "6px 10px", borderRadius: 10, border: "none", background: S.greenSoft, color: "#1b8d4b", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Reactivate</button>
                                 )}
+                                <button onClick={() => handleRemove(u)} style={{ padding: "6px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
                               </div>
                             </td>
                           </tr>
@@ -3897,6 +2837,7 @@ export default function OrgPartnerAdmin() {
                     ) : (
                       <button onClick={() => handleReactivate(selectedEligible)} style={{ ...btnOutline, background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.18)" }}>Reactivate</button>
                     )}
+                    <button onClick={() => handleRemove(selectedEligible)} style={{ ...btnOutline, background: "rgba(239,68,68,.15)", color: "#fca5a5", border: "1px solid rgba(239,68,68,.3)" }}>Remove</button>
                   </div>
                 </div>
               </div>
@@ -3967,7 +2908,6 @@ export default function OrgPartnerAdmin() {
           {/* ══ CONTRACT ══ */}
           {page === "contract" && (() => {
             const fd = contract ? parseContractFormData(contract) : null;
-            const paidPhase = contract && contract.status === "paid" ? getPaidContractPhase(contract) : null;
 
             // ── Loading ──
             if (contractLoading) return (
@@ -3981,15 +2921,15 @@ export default function OrgPartnerAdmin() {
             if (contract && contract.status === "pending_payment") return (
               <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
                 <CheckCircle size={36} style={{ color: S.blue, margin: "0 auto 12px" }} />
-                <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Approved — Awaiting Payment</div>
+                <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Approved!</div>
                 <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6, marginBottom: 20 }}>
                   CLBPrep has reviewed and approved your contract.<br />
-                  Please review the agreement below, then continue to Stripe to complete payment and activate your seats.
+                  Click below to continue to Stripe, complete payment, and activate your seats.
                 </div>
                 <div style={{ marginBottom: 16, padding: "12px 20px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, display: "inline-flex", flexDirection: "column", gap: 4, textAlign: "left" }}>
                   {[
                     ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/month`],
-                    ["Term", formatStoredTermLabel(fd)],
+                    ["Term", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
                     ["Start", fd?.startDate || "—"],
                     ["Total", `CAD $${fd?.totalPrice}`],
                   ].map(([l, v]) => (
@@ -4013,314 +2953,22 @@ export default function OrgPartnerAdmin() {
 
             if (contract && contract.status === "paid") return (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Hidden contract template kept in DOM so contractPdfRef is populated */}
-                <div style={{ display: "none" }}>
-                  <div ref={contractPdfRef}>
-                    <ContractTemplate
-                      data={{ ...parseContractFormData(contract), clbprepSignerName: contract.adminSignerName || "Soheila Azizi", clbprepSignerTitle: contract.adminSignerTitle || "Owner" } as any}
-                      mode="signed"
-                      orgSignerName={contract.orgSignerName}
-                      orgSignerTitle={contract.orgSignerTitle}
-                      orgSignature={contract.orgSignature}
-                      orgSignedAt={contract.orgSignedAt}
-                      adminSignerName={contract.adminSignerName || "Soheila Azizi"}
-                      adminSignerTitle={contract.adminSignerTitle || "Owner"}
-                      adminApprovedAt={contract.adminApprovedAt}
-                    />
-                  </div>
-                </div>
                 <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "32px 24px", textAlign: "center" }}>
-                  <CheckCircle size={36} style={{ color: paidPhase?.phase === "scheduled" ? S.blue : S.green, margin: "0 auto 12px" }} />
-                  <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>
-                    {paidPhase?.phase === "scheduled" ? "Contract Scheduled" : "Contract Active"}
-                  </div>
+                  <CheckCircle size={36} style={{ color: S.green, margin: "0 auto 12px" }} />
+                  <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>Contract Active</div>
                   <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.6 }}>
-                    {paidPhase?.phase === "scheduled"
-                      ? <>Your next contract has been signed and paid, and will activate for your {fd?.selectedPlan} seats on the effective date below.<br /></>
-                      : <>Your current contract is active and your {fd?.selectedPlan} seats are enabled.<br /></>
-                    }
+                    Your contract is active and your {fd?.selectedPlan} seats are enabled.<br />
                     Approved by <strong>{contract.adminSignerName || "Soheila Azizi"}</strong> on {formatContractDate(contract.adminApprovedAt)}<br />
-                    Signed by <strong>{contract.orgSignerName}</strong> on {formatContractDate(contract.orgSignedAt)}<br />
-                    {fd?.startDate && <>Contract start date <strong>{formatContractDate(fd.startDate)}</strong><br /></>}
-                    {fd?.effectiveDate && <>Effective date <strong>{formatContractDate(fd.effectiveDate)}</strong><br /></>}
-                    {(() => {
-                      const timing = getContractTiming(contract);
-                      if (!timing.end) return null;
-                      const expiry = formatContractDate(timing.end.toISOString());
-                      const today = getTodayUtcDate();
-                      const daysLeft = Math.max(0, Math.ceil((timing.end.getTime() - today.getTime()) / MS_PER_DAY));
-                      return (
-                        <>
-                          {paidPhase?.phase === "scheduled"
-                            ? <>Scheduled to end <strong>{expiry}</strong></>
-                            : <>Expires <strong>{expiry}</strong> ({daysLeft} day{daysLeft !== 1 ? "s" : ""} remaining)</>
-                          }
-                          {timing.carryoverDays > 0 && (
-                            <>
-                              <br />
-                              Includes <strong>{timing.carryoverDays}</strong> carryover day{timing.carryoverDays !== 1 ? "s" : ""}
-                            </>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-                  <div style={{ marginTop: 18, fontSize: 11, color: S.textSoft }}>
-                    View or download contract files from the <strong>All Contracts</strong> section below.
+                    Signed by <strong>{contract.orgSignerName}</strong> on {contract.orgSignedAt ? new Date(contract.orgSignedAt).toLocaleDateString("en-CA") : "—"}
                   </div>
                 </div>
 
-                {/* ── Pending renewal notice (shown when a new contract is under review) ── */}
-                {pendingRenewal && (
-                  <div style={{ background: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#f0fdf4" : "#fffbeb", border: `1px solid ${pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#86efac" : "#fde68a"}`, borderRadius: 16, padding: "20px 24px" }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                      {pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment"
-                        ? <CheckCircle size={16} style={{ color: "#16a34a", flexShrink: 0, marginTop: 2 }} />
-                        : <AlertCircle size={16} style={{ color: "#d97706", flexShrink: 0, marginTop: 2 }} />
-                      }
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#14532d" : "#92400e", marginBottom: 3 }}>
-                          {pendingRenewal.status === "paid"
-                            ? "Next contract scheduled"
-                            : pendingRenewal.status === "pending_payment"
-                              ? "🎉 New contract approved — payment required"
-                              : "New contract request in progress"
-                          }
-                        </div>
-                        <div style={{ fontSize: 12, color: pendingRenewal.status === "paid" || pendingRenewal.status === "pending_payment" ? "#15803d" : "#92400e", lineHeight: 1.6 }}>
-                          {pendingRenewal.status === "paid" && (
-                            (() => {
-                              const nextTiming = getContractTiming(pendingRenewal);
-                              return (
-                                <>Your current contract stays active until {contract ? formatContractDate(getContractTiming(contract).end?.toISOString()) : "—"}. The next contract becomes effective on {formatContractDate(nextTiming.effectiveStart?.toISOString())} and runs until {formatContractDate(nextTiming.end?.toISOString())}.</>
-                              );
-                            })()
-                          )}
-                          {pendingRenewal.status === "pending_payment" && (
-                            <>CLBPrep has approved your new contract. Complete payment to activate your new seats.<br />Your current contract remains active until the new one is paid.</>
-                          )}
-                          {pendingRenewal.status === "pending_admin" && (
-                            <>Your renewal request is under review by CLBPrep. Your current contract remains active in the meantime.</>
-                          )}
-                          {pendingRenewal.status === "pending_org" && (
-                            <>Your renewal contract is awaiting your signature. Your current contract remains active in the meantime.</>
-                          )}
-                        </div>
-                        {pendingRenewal.status === "pending_payment" && (
-                          <div style={{ marginTop: 14 }}>
-                            <button
-                              type="button"
-                              onClick={() => startStripeCheckout(pendingRenewal)}
-                              style={{ ...btnPrimary, background: "linear-gradient(135deg,#16a34a,#15803d)", padding: "10px 24px", fontSize: 13 }}
-                            >
-                              Proceed to Payment →
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── New contract / more seats ── */}
-                <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Need more seats or a new term?</div>
-                    <div style={{ fontSize: 12, color: S.textSoft }}>
-                      {pendingRenewal
-                        ? "You already have a scheduled or pending contract, but you can still request another quote if you need different seats or dates."
-                        : "Request a new quote and sign a new contract to adjust your plan."}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowContractRequestFlow((prev) => !prev)}
-                    style={showContractRequestFlow ? btnOutline : btnPrimary}
-                  >
-                    {showContractRequestFlow ? "Hide Quote Form" : "Request New Seats / Contract"}
-                  </button>
-                </div>
-
-                {showContractRequestFlow && (
-                  <ContractRequestFlow
-                    partnerName={partnerName}
-                    orgUserId={orgUserId}
-                    adminName={adminName}
-                    activeContract={renewalGuardContract || contract || null}
-                    onSubmitted={() => {
-                      setShowContractRequestFlow(false);
-                      loadContract();
-                    }}
-                    S={S}
-                    titleFont={titleFont}
-                    inputStyle={inputStyle}
-                    btnPrimary={btnPrimary}
-                    btnOutline={btnOutline}
-                  />
-                )}
-
-                {/* ── All contracts history ── */}
-                {allContracts.length > 0 && (
-                  <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, overflow: "hidden" }}>
-                    <div style={{ padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: "#f8fafc" }}>
-                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text }}>All Contracts</div>
-                      <div style={{ fontSize: 11, color: S.textSoft, marginTop: 2 }}>All contract requests for your organization</div>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      {allContracts.map((c: any, i: number) => {
-                        const cfd = safeParseContractFormData(c);
-                        const cTiming = getContractTiming(c);
-                        const paidState = c.status === "paid" ? getPaidContractPhase(c) : null;
-                        const isCurrentServiceContract = c.status === "paid" && paidState?.phase === "active";
-                        const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-                          pending_payment: { bg: "#fef9c3", text: "#854d0e", label: "Awaiting Payment" },
-                          pending_admin:   { bg: "#dbeafe", text: "#1d4ed8", label: "Under Review" },
-                          pending_org:     { bg: "#fef3c7", text: "#92400e", label: "Awaiting Signature" },
-                          expired:         { bg: "#fee2e2", text: "#b91c1c", label: "Expired" },
-                          cancelled:       { bg: "#f3f4f6", text: "#6b7280", label: "Cancelled" },
-                        };
-                        const sc =
-                          c.status === "paid"
-                            ? paidState?.phase === "active"
-                              ? { bg: "#dcfce7", text: "#15803d", label: "Active" }
-                              : paidState?.phase === "scheduled"
-                                ? { bg: "#dbeafe", text: "#1d4ed8", label: "Scheduled" }
-                                : { bg: "#fee2e2", text: "#b91c1c", label: "Expired" }
-                            : statusColors[c.status] || { bg: "#f3f4f6", text: "#6b7280", label: c.status };
-                        return (
-                          <div key={c.$id}>
-                            {/* Hidden template render so openAnyContractPdf can read its HTML */}
-                            <div style={{ display: "none" }}>
-                              <div ref={el => { if (el) contractPdfRefs.current.set(c.$id, el); }}>
-                                <ContractTemplate
-                                  data={{ ...parseContractFormData(c), clbprepSignerName: c.adminSignerName || "Soheila Azizi", clbprepSignerTitle: c.adminSignerTitle || "Owner" } as any}
-                                  mode="signed"
-                                  orgSignerName={c.orgSignerName}
-                                  orgSignerTitle={c.orgSignerTitle}
-                                  orgSignature={c.orgSignature}
-                                  orgSignedAt={c.orgSignedAt}
-                                  adminSignerName={c.adminSignerName || "Soheila Azizi"}
-                                  adminSignerTitle={c.adminSignerTitle || "Owner"}
-                                  adminApprovedAt={c.adminApprovedAt}
-                                />
-                              </div>
-                            </div>
-                            <div style={{ padding: "14px 20px", borderBottom: i < allContracts.length - 1 ? `1px solid ${S.border}` : "none", background: isCurrentServiceContract ? "#f0fdf4" : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, fontWeight: 700, color: S.text }}>{cfd?.selectedPlan} seats — CAD ${cfd?.totalPrice}</span>
-                                  {isCurrentServiceContract && <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "1px 7px", borderRadius: 999 }}>CURRENT</span>}
-                                </div>
-                                <div style={{ fontSize: 11, color: S.textSoft }}>
-                                  {formatStoredTermLabel(cfd)} · Contract start: {formatContractDate(cfd?.startDate)} · Effective: {formatContractDate(cfd?.effectiveDate || cfd?.startDate)} · Expires: {cTiming.end ? formatContractDate(cTiming.end.toISOString()) : "—"} · Submitted: {formatContractDate(c.$createdAt)}
-                                  {cTiming.carryoverDays > 0 && ` · +${cTiming.carryoverDays} carryover day${cTiming.carryoverDays !== 1 ? "s" : ""}`}
-                                </div>
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "3px 10px", borderRadius: 999 }}>{sc.label}</span>
-                                {(c.status === "paid" || c.status === "expired") && (
-                                  <>
-                                    <button type="button" onClick={() => openAnyContractPdf(c, false)} style={{ ...btnOutline, padding: "4px 12px", fontSize: 11 }}>
-                                      <FolderOpen size={12} /> View
-                                    </button>
-                                    <button type="button" onClick={() => openAnyContractPdf(c, true)} style={{ ...btnOutline, padding: "4px 12px", fontSize: 11 }}>
-                                      <Download size={12} /> Download
-                                    </button>
-                                  </>
-                                )}
-                                {c.status === "pending_payment" && (
-                                  <button type="button" onClick={() => startStripeCheckout(c)} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>
-                                    Pay Now →
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                {renderContractDocumentPanel(contract, {
+                  title: "Active Contract",
+                  note: "You can open the active contract in a PDF-style view or download/save it as PDF anytime.",
+                })}
               </div>
             );
-
-            if (contract && contract.status === "expired") {
-              // Calculate expiry date for display
-              const expiredTiming = contract ? getContractTiming(contract) : null;
-              const expiryDisplay = expiredTiming?.end ? formatContractDate(expiredTiming.end.toISOString()) : "—";
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {/* ── Expired notice ── */}
-                  <div style={{ background: "#fff", border: `1px solid ${S.red}22`, borderRadius: 16, padding: "28px 24px", textAlign: "center" }}>
-                    <AlertCircle size={36} style={{ color: S.red, margin: "0 auto 12px" }} />
-                    <div style={{ fontFamily: titleFont, fontSize: 15, fontWeight: 800, color: S.text, marginBottom: 6 }}>
-                      Contract Expired
-                    </div>
-                    <div style={{ fontSize: 12, color: S.textSoft, lineHeight: 1.8 }}>
-                      Your contract expired on <strong>{expiryDisplay}</strong>.<br />
-                      All learner access has been deactivated.<br />
-                      Please request a new contract to restore access.
-                    </div>
-                    {/* PDF access still available */}
-                    <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
-                      <div style={{ display: "none" }}>
-                        <div ref={contractPdfRef}>
-                          <ContractTemplate
-                            data={{ ...parseContractFormData(contract), clbprepSignerName: contract.adminSignerName || "Soheila Azizi", clbprepSignerTitle: contract.adminSignerTitle || "Owner" } as any}
-                            mode="signed"
-                            orgSignerName={contract.orgSignerName}
-                            orgSignerTitle={contract.orgSignerTitle}
-                            orgSignature={contract.orgSignature}
-                            orgSignedAt={contract.orgSignedAt}
-                            adminSignerName={contract.adminSignerName || "Soheila Azizi"}
-                            adminSignerTitle={contract.adminSignerTitle || "Owner"}
-                            adminApprovedAt={contract.adminApprovedAt}
-                          />
-                        </div>
-                      </div>
-                      <button type="button" onClick={() => openAnyContractPdf(contract, false)} style={btnOutline}>
-                        <FolderOpen size={14} /> View Expired Contract
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ── Request new contract ── */}
-                  <div style={{ background: "#fff", border: `1px solid ${S.border}`, borderRadius: 16, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
-                    <div>
-                      <div style={{ fontFamily: titleFont, fontSize: 13, fontWeight: 800, color: S.text, marginBottom: 2 }}>Renew or upgrade your plan</div>
-                      <div style={{ fontSize: 12, color: S.textSoft }}>
-                        Request a new quote to restore learner access. Contact <a href="mailto:support@clbprep.com" style={{ color: S.blue }}>support@clbprep.com</a> if you have questions.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowContractRequestFlow((prev) => !prev)}
-                      style={showContractRequestFlow ? btnOutline : btnPrimary}
-                    >
-                      {showContractRequestFlow ? "Hide Quote Form" : "Request New Contract"}
-                    </button>
-                  </div>
-
-                  {showContractRequestFlow && (
-                    <ContractRequestFlow
-                      partnerName={partnerName}
-                      orgUserId={orgUserId}
-                      adminName={adminName}
-                      activeContract={renewalGuardContract || contract || null}
-                      onSubmitted={() => {
-                        setShowContractRequestFlow(false);
-                        loadContract();
-                      }}
-                      S={S}
-                      titleFont={titleFont}
-                      inputStyle={inputStyle}
-                      btnPrimary={btnPrimary}
-                      btnOutline={btnOutline}
-                    />
-                  )}
-                </div>
-              );
-            }
 
             if (contract && contract.status === "cancelled") return (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -4348,7 +2996,6 @@ export default function OrgPartnerAdmin() {
                     partnerName={partnerName}
                     orgUserId={orgUserId}
                     adminName={adminName}
-                    activeContract={renewalGuardContract || contract || null}
                     onSubmitted={() => {
                       setShowContractRequestFlow(false);
                       loadContract();
@@ -4379,7 +3026,7 @@ export default function OrgPartnerAdmin() {
                       {[
                         ["Organization", fd?.organizationName],
                         ["Plan", `${fd?.selectedPlan} seats — CAD $${fd?.selectedPlanPrice}/mo`],
-                        ["Duration", formatStoredTermLabel(fd)],
+                        ["Duration", `${fd?.months} month${(fd?.months || 1) > 1 ? "s" : ""}`],
                         ["Total", `CAD $${fd?.totalPrice}`],
                         ["Start Date", fd?.startDate],
                         ["Submitted", new Date(contract.createdAt).toLocaleDateString("en-CA")],
@@ -4430,7 +3077,6 @@ export default function OrgPartnerAdmin() {
               partnerName={partnerName}
               orgUserId={orgUserId}
               adminName={adminName}
-              activeContract={renewalGuardContract || contract || null}
               onSubmitted={() => {
                 setShowContractRequestFlow(false);
                 loadContract();
@@ -4443,8 +3089,8 @@ export default function OrgPartnerAdmin() {
             />;
           })()}
 
-          {/* ══ REPORTS ══ */}
-          {(page as any) === "reports" && (
+          {/* ══ REPORTS — TEMPORARILY HIDDEN ══ */}
+          {false && (page as any) === "reports" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{ background: "linear-gradient(135deg,#1e3a5f,#1e3352)", borderRadius: 16, padding: "16px 22px", color: "white", display: "flex", alignItems: "center", gap: 14 }}>
                 <FileText size={24} style={{ flexShrink: 0, opacity: 0.8 }} />

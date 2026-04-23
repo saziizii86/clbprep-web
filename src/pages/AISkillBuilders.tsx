@@ -463,7 +463,8 @@ function buildSystemPrompt(
   topic: Topic,
   duration: Duration,
   grammarTopic?: string,
-  grammarSubTopic?: string
+  grammarSubTopic?: string,
+  userName?: string
 ): string {
   const levelMap: Record<Level, string> = {
     beginner: "CLB 4-5 (beginner)",
@@ -535,7 +536,9 @@ function buildSystemPrompt(
     speed:     "SPEED ROUND — fast-paced only, one short question at a time, minimal explanation, keep moving quickly",
   };
 
-  const base = `You are a friendly, expert CELPIP English coach.
+  const base = `You are a friendly, expert CELPIP English coach running a ${builder.title} session.
+BUILDER TYPE: ${builder.id.toUpperCase()} — you MUST stay in this builder mode for the ENTIRE session. Do NOT drift to vocabulary lists, grammar drills, or any other builder type.
+Student name: ${userName ? userName : "the student"}.
 Student level: ${levelMap[level]}.
 Topic: ${topicLabel} — specifically the angle: "${angle}".${
   builder.id === "grammar" && grammarTopic
@@ -870,7 +873,7 @@ After all answers: score (X/8) + explanations for every question.`,
     base +
     "\n\n" +
     (instructions[builder.id] ?? "") +
-    "\n\nStart NOW: greet the student in 1 warm sentence mentioning the specific angle, then immediately begin Exercise 1. Be specific, fresh, and direct."
+    "\n\nStart NOW: greet " + (userName ? userName : "the student") + " by name in 1 warm sentence mentioning the specific angle, then immediately begin Exercise 1 as a " + builder.title + " exercise. Be specific, fresh, and direct."
   );
 }
 
@@ -1932,8 +1935,9 @@ const PronunciationSession: React.FC<{
   topic: Topic;
   duration: Duration;
   userId?: string;
+  userName?: string;
   onBack: () => void;
-}> = ({ builder, mode, level, topic, duration, userId, onBack }) => {
+}> = ({ builder, mode, level, topic, duration, userId, userName, onBack }) => {
   const [phase, setPhase] = useState<"loading" | "practice" | "done">("loading");
   const [pageWords, setPageWords] = useState<PronWord[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -2025,7 +2029,7 @@ useEffect(() => {
 
     const seed = Math.floor(Math.random() * 999999);
     const excludeList = Array.from(used).slice(-30).join(", "); // exclude last 30 used words
-    const prompt = `Generate exactly 5 English words related to "${topicLabel}" for a ${levelMap[level]} learner to practice pronouncing.
+    const prompt = `Generate exactly 5 English words related to "${topicLabel}" for ${userName ? userName + ", a" : "a"} ${levelMap[level]} learner to practice pronouncing.
 
 Seed: ${seed} — generate a COMPLETELY RANDOM, DIFFERENT set every call.
 ${excludeList ? `DO NOT use any of these already-used words: ${excludeList}` : ""}
@@ -2120,7 +2124,7 @@ Rules:
           <button onClick={onBack} className="p-2 rounded-xl text-gray-500 hover:bg-gray-100">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-bold text-gray-900 text-lg">Session Results</h2>
+          <h2 className="font-bold text-gray-900 text-lg">{userName ? `${userName}'s Session Results` : "Session Results"}</h2>
         </div>
         <div className="bg-gradient-to-br from-fuchsia-50 to-pink-50 border border-fuchsia-200 rounded-2xl p-6 text-center">
           <p className="text-4xl font-black text-fuchsia-600 mb-1">{avg}%</p>
@@ -2238,8 +2242,9 @@ const ConversationSession: React.FC<{
   topic: Topic;
   duration: Duration;
   userId?: string;
+  userName?: string;
   onBack: () => void;
-}> = ({ builder, mode, goal, level, topic, duration, userId, onBack }) => {
+}> = ({ builder, mode, goal, level, topic, duration, userId, userName, onBack }) => {
   const [phase, setPhase] = useState<"start" | "active" | "feedback">("start");
   const [turns, setTurns] = useState<ConvTurn[]>([]);
   const [history, setHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -2266,7 +2271,7 @@ const ConversationSession: React.FC<{
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const topicLabel = TOPICS.find((t) => t.id === topic)?.label ?? topic;
-  const systemPrompt = buildSystemPrompt(builder, mode, goal, level, topic, duration);
+  const systemPrompt = buildSystemPrompt(builder, mode, goal, level, topic, duration, undefined, undefined, userName);
 
   // Scroll to top when session mounts
   useEffect(() => { window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior }); }, []);
@@ -2859,10 +2864,11 @@ const AISessionChat: React.FC<{
   topic: Topic;
   duration: Duration;
   userId?: string;
+  userName?: string;
   grammarTopic?: string;
   grammarSubTopic?: string;
   onBack: () => void;
-}> = ({ builder, mode, goal, level, topic, duration, userId, grammarTopic, grammarSubTopic, onBack }) => {
+}> = ({ builder, mode, goal, level, topic, duration, userId, userName, grammarTopic, grammarSubTopic, onBack }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -2880,7 +2886,7 @@ const AISessionChat: React.FC<{
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const systemPrompt = buildSystemPrompt(builder, mode, goal, level, topic, duration, grammarTopic, grammarSubTopic);
+  const systemPrompt = buildSystemPrompt(builder, mode, goal, level, topic, duration, grammarTopic, grammarSubTopic, userName);
   const Icon = builder.icon;
 
   // Scroll to top when session mounts
@@ -3212,6 +3218,7 @@ const BuilderDetailPage: React.FC<{
   openUpgradeModal: (msg?: string) => void;
   onSessionComplete?: () => void;
   userId?: string;
+  userName?: string;
 }> = ({
   builder,
   isProMember,
@@ -3222,6 +3229,7 @@ const BuilderDetailPage: React.FC<{
   onBack,
   openUpgradeModal,
   userId,
+  userName,
 }) => {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
@@ -3252,6 +3260,7 @@ const BuilderDetailPage: React.FC<{
           topic={topic}
           duration={duration}
           userId={userId}
+          userName={userName}
           onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
         />
       );
@@ -3265,6 +3274,7 @@ const BuilderDetailPage: React.FC<{
           topic={topic}
           duration={duration}
           userId={userId}
+          userName={userName}
           onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
         />
       );
@@ -3278,6 +3288,7 @@ const BuilderDetailPage: React.FC<{
         topic={topic}
         duration={duration}
         userId={userId}
+        userName={userName}
         grammarTopic={grammarTopic ?? undefined}
         grammarSubTopic={grammarSubTopic ?? undefined}
         onBack={() => { setSessionStarted(false); setTimeout(() => onSessionComplete?.(), 100); }}
@@ -3727,9 +3738,10 @@ interface AISkillBuildersProps {
   openUpgradeModal: (msg?: string) => void;
   onBack: () => void;
   userId?: string;
+  userName?: string;
 }
 
-const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgradeModal, onBack, userId }) => {
+const AISkillBuilders: React.FC<AISkillBuildersProps> = ({ isProMember, openUpgradeModal, onBack, userId, userName }) => {
   const [activeBuilder, setActiveBuilder] = useState<Builder | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<SessionHistoryRecord[]>([]);
@@ -3781,6 +3793,7 @@ if (activeBuilder) {
       onBack={() => setActiveBuilder(null)}
       openUpgradeModal={openUpgradeModal}
       userId={userId}
+      userName={userName}
     />
   );
 }

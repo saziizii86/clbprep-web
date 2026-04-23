@@ -4816,6 +4816,7 @@ onClick={() => {
     isProMember={isProMember}  // keep this — AI users are still "pro" for this section
     openUpgradeModal={openUpgradeModal}
     userId={userRowId ?? undefined}
+    userName={settingsForm.displayName || undefined}
     onBack={() => {
       setActiveTab("dashboard");
       setCurrentView("dashboard");

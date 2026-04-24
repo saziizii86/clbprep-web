@@ -304,6 +304,8 @@ const DURATIONS = [
 ];
 
 const GRAMMAR_TOPICS: { id: string; label: string; emoji: string; desc: string; celpipRelevance: string }[] = [
+  { id: "simple-present",    label: "Simple Present",           emoji: "🟢", desc: "I work, she works — habits & facts", celpipRelevance: "Foundation for all writing tasks" },
+  { id: "simple-past",       label: "Simple Past",              emoji: "⏪", desc: "I worked, she went — completed actions", celpipRelevance: "Reading & Listening tasks" },
   { id: "present-perfect",   label: "Present Perfect",          emoji: "⏱️", desc: "Have/has + past participle", celpipRelevance: "Writing Task 1 & emails" },
   { id: "past-tenses",       label: "Past Tenses",              emoji: "⏮️", desc: "Simple, continuous, perfect", celpipRelevance: "Reading & writing tasks" },
   { id: "future-forms",      label: "Future Forms",             emoji: "🔮", desc: "Will, going to, present continuous", celpipRelevance: "Opinion writing" },
@@ -324,6 +326,18 @@ const GRAMMAR_TOPICS: { id: string; label: string; emoji: string; desc: string; 
 
 
 const GRAMMAR_SUBTOPICS: Record<string, { id: string; label: string; desc: string }[]> = {
+  "simple-present": [
+    { id: "habits-routines",     label: "Habits & Routines",      desc: "I usually wake up at 7 — adverbs of frequency" },
+    { id: "facts-general-truth", label: "Facts & General Truths", desc: "Water boils at 100°C — permanent states" },
+    { id: "third-person-s",      label: "Third Person -s",        desc: "She works / He does not — the -s rule" },
+    { id: "negatives-questions", label: "Negatives & Questions",  desc: "Do/does — do you work? she does not eat" },
+  ],
+  "simple-past": [
+    { id: "regular-verbs",       label: "Regular Verbs",          desc: "Walked, worked, watched — adding -ed" },
+    { id: "irregular-verbs",     label: "Irregular Verbs",        desc: "Went, ate, bought — common irregular forms" },
+    { id: "negatives-questions", label: "Negatives & Questions",  desc: "Did not + base form — did you go?" },
+    { id: "time-expressions",    label: "Time Expressions",       desc: "Yesterday, last week, in 2020, ago" },
+  ],
   "present-perfect": [
     { id: "experiences", label: "Experiences", desc: "Have you ever…? Talking about life experiences" },
     { id: "recent-events", label: "Recent Events", desc: "Something just happened — just, already, yet" },

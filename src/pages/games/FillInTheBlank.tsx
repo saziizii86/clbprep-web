@@ -24,6 +24,8 @@ function FillInBlankInner({ config, onBack, onReset }: { config: GameConfig; onB
   const [idx, setIdx] = useState(0);
   const [selected, setSelected] = useState<string|null>(null);
   const [feedback, setFeedback] = useState<"correct"|"wrong"|null>(null);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctionResult, setCorrectionResult] = useState<"correct"|"wrong"|null>(null);
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(config.duration * 60);
   const [gameOver, setGameOver] = useState(false);
@@ -60,42 +62,95 @@ Return ONLY a JSON array:
   }, [timeLeft, gameOver, isGenerating]);
   
   // ── Session tracking ──────────────────────────
-useEffect(() => {
-  if (!isGenerating && !genError) {
-    startSession("fb", "Fill in the Blank", "grammar", config.topic, config.difficulty);
-  }
-  return () => stopSession();
-}, [isGenerating, genError]);
+  useEffect(() => {
+    if (!isGenerating && !genError) {
+      startSession("fb", "Fill in the Blank", "grammar", config.topic, config.difficulty);
+    }
+    return () => stopSession();
+  }, [isGenerating, genError]);
 
   const fmt = (s: number) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
   const current = questions[idx];
   const shuffledOpts = useMemo(() => current ? shuffle([...current.options]) : [], [idx, questions.length]);
 
   const handleSelect = (opt: string) => {
-    if (feedback || !current) return;
+    if (!current) return;
+    // During correction: show result immediately, don't allow re-picking
+    if (correcting && !correctionResult) {
+      setSelected(opt);
+      const ok = opt === current.correct;
+      setCorrectionResult(ok ? "correct" : "wrong");
+      return;
+    }
+    // Normal first attempt
+    if (feedback) return;
     setSelected(opt);
     const ok = opt === current.correct;
     setFeedback(ok ? "correct" : "wrong");
     if (ok) setScore(s => s + 1);
   };
+
+  const startCorrection = () => {
+    setFeedback(null);
+    setCorrecting(true);
+    setCorrectionResult(null);
+    setSelected(null);
+  };
+
   const next = () => {
     if (idx + 1 >= questions.length) { setGameOver(true); return; }
-    setIdx(i => i + 1); setSelected(null); setFeedback(null);
+    setIdx(i => i + 1);
+    setSelected(null);
+    setFeedback(null);
+    setCorrecting(false);
+    setCorrectionResult(null);
   };
 
   const renderSentence = () => {
     if (!current) return null;
     const parts = current.sentence.split("___");
+    const displayWord = selected || "___";
+    const fillColor = correctionResult === "correct" ? "bg-green-100 text-green-800 border-green-500"
+      : correctionResult === "wrong" ? "bg-red-50 text-red-700 border-red-400"
+      : correcting && !selected ? "bg-amber-50 text-amber-600 border-amber-400"
+      : feedback === "correct" ? "bg-green-100 text-green-800 border-green-500"
+      : feedback === "wrong" ? "bg-red-50 text-red-700 border-red-400"
+      : selected ? "bg-orange-50 text-orange-700 border-orange-400"
+      : "bg-gray-100 text-gray-400 border-gray-400";
     return (
       <span>
         {parts[0]}
-        <span className={`inline-block min-w-[90px] px-3 py-0.5 mx-1 rounded-lg font-bold border-b-2 text-center
-          ${feedback==="correct"?"bg-green-100 text-green-800 border-green-500":feedback==="wrong"?"bg-red-50 text-red-700 border-red-400":selected?"bg-orange-50 text-orange-700 border-orange-400":"bg-gray-100 text-gray-400 border-gray-400"}`}>
-          {selected || "___"}
+        <span className={`inline-block min-w-[90px] px-3 py-0.5 mx-1 rounded-lg font-bold border-b-2 text-center ${fillColor}`}>
+          {displayWord}
         </span>
         {parts[1]}
       </span>
     );
+  };
+
+  // Option button styling
+  const optionStyle = (opt: string) => {
+    const isCorrect = opt === current?.correct;
+    const isSel = opt === selected;
+
+    // After correction attempt: reveal correct/wrong
+    if (correctionResult) {
+      if (isCorrect) return "bg-green-100 border-green-500 text-green-800";
+      if (isSel && !isCorrect) return "bg-red-100 border-red-400 text-red-700";
+      return "bg-gray-50 border-gray-200 text-gray-400";
+    }
+    // During correction mode (before picking): show as fresh options
+    if (correcting) {
+      return "bg-white border-orange-200 text-orange-800 hover:bg-orange-50 hover:border-orange-400 cursor-pointer";
+    }
+    // After first attempt: reveal
+    if (feedback) {
+      if (isCorrect) return "bg-green-100 border-green-500 text-green-800";
+      if (isSel) return "bg-red-100 border-red-400 text-red-700";
+      return "bg-gray-50 border-gray-200 text-gray-400";
+    }
+    // Default (no feedback yet)
+    return "bg-white border-orange-200 text-orange-800 hover:bg-orange-50 hover:border-orange-400 cursor-pointer";
   };
 
   if (isGenerating) return (
@@ -151,32 +206,64 @@ useEffect(() => {
         <div className="bg-white rounded-2xl border border-orange-200 p-6 mb-6 shadow-sm">
           <p className="text-xl text-gray-800 font-medium leading-relaxed text-center">{renderSentence()}</p>
         </div>
+
         <div className="grid grid-cols-2 gap-3 mb-5">
-          {shuffledOpts.map(opt => {
-            const isCorrect = opt===current?.correct, isSel = opt===selected;
-            return (
-              <button key={opt} onClick={()=>handleSelect(opt)} disabled={!!feedback}
-                className={`py-4 px-3 rounded-2xl border-2 text-sm font-semibold transition text-center
-                  ${feedback ? isCorrect?"bg-green-100 border-green-500 text-green-800":isSel?"bg-red-100 border-red-400 text-red-700":"bg-gray-50 border-gray-200 text-gray-400"
-                    : "bg-white border-orange-200 text-orange-800 hover:bg-orange-50 hover:border-orange-400 cursor-pointer"}`}>
-                {opt}
-              </button>
-            );
-          })}
+          {shuffledOpts.map(opt => (
+            <button key={opt}
+              onClick={() => handleSelect(opt)}
+              disabled={!!feedback && !correcting || !!correctionResult}
+              className={`py-4 px-3 rounded-2xl border-2 text-sm font-semibold transition text-center ${optionStyle(opt)}`}>
+              {opt}
+            </button>
+          ))}
         </div>
-        {feedback && <div className={`rounded-xl px-4 py-3 mb-5 text-sm ${feedback==="correct"?"bg-green-100 text-green-800":"bg-red-50 text-red-700"}`}>
-          {feedback==="correct" ? <><strong>✓ Correct!</strong> {current?.explanation}</> : <><strong>✗ Incorrect.</strong> Answer: "<strong>{current?.correct}</strong>". {current?.explanation}</>}
-        </div>}
+
+        {/* Feedback / correction banners */}
+        {feedback && !correcting && (
+          <div className={`rounded-xl px-4 py-3 mb-5 text-sm ${feedback==="correct"?"bg-green-100 text-green-800":"bg-red-50 text-red-700"}`}>
+            {feedback==="correct"
+              ? <><strong>✓ Correct!</strong> {current?.explanation}</>
+              : <><strong>✗ Incorrect.</strong> Answer: "<strong>{current?.correct}</strong>". {current?.explanation}</>}
+          </div>
+        )}
+        {correcting && !correctionResult && (
+          <div className="rounded-xl px-4 py-3 mb-5 text-sm font-medium bg-amber-50 text-amber-700">
+            ✏️ Select the correct answer from the options above
+          </div>
+        )}
+        {correcting && correctionResult && (
+          <div className={`rounded-xl px-4 py-3 mb-5 text-sm ${correctionResult==="correct"?"bg-green-100 text-green-800":"bg-red-50 text-red-700"}`}>
+            {correctionResult==="correct"
+              ? <><strong>✓ Well corrected!</strong> {current?.explanation}</>
+              : <><strong>✗ Not quite.</strong> Answer: "<strong>{current?.correct}</strong>". {current?.explanation}</>}
+          </div>
+        )}
+
         <div className="flex gap-3">
-          {!feedback ? (
+          {correcting ? (
+            correctionResult ? (
+              <button onClick={next} className="w-full py-3 rounded-xl bg-orange-500 text-white font-bold text-sm hover:bg-orange-600 flex items-center justify-center gap-2">
+                {idx+1<questions.length?"Next Question":"See Results"} <ChevronRight className="w-4 h-4"/>
+              </button>
+            ) : (
+              <button onClick={next} className="w-full py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm">Skip</button>
+            )
+          ) : !feedback ? (
             <button onClick={onReset} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4"/>New Session</button>
-          ) : (
+          ) : feedback==="correct" ? (
             <button onClick={next} className="w-full py-3 rounded-xl bg-orange-500 text-white font-bold text-sm hover:bg-orange-600 flex items-center justify-center gap-2">
               {idx+1<questions.length?"Next Question":"See Results"} <ChevronRight className="w-4 h-4"/>
             </button>
+          ) : (
+            <>
+              <button onClick={startCorrection} className="flex-1 py-3 rounded-xl border-2 border-orange-500 text-orange-500 font-semibold text-sm hover:bg-orange-50 transition">✏️ Try to Correct</button>
+              <button onClick={next} className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-bold text-sm hover:bg-orange-600 flex items-center justify-center gap-2">
+                {idx+1<questions.length?"Next Question":"See Results"} <ChevronRight className="w-4 h-4"/>
+              </button>
+            </>
           )}
         </div>
-        <p className="text-center mt-3 text-xs text-gray-500">Score: <span className="font-bold text-orange-600">{score}/{idx+(feedback?1:0)}</span></p>
+        <p className="text-center mt-3 text-xs text-gray-500">Score: <span className="font-bold text-orange-600">{score}/{idx+(feedback||correctionResult?1:0)}</span></p>
       </div>
     </div>
   );

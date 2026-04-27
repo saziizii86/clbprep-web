@@ -60,6 +60,7 @@ interface Group {
   schedule: string;
   seats: number;
   desc?: string;
+  teacherEmail?: string;   // comma-separated list of teacher emails
 }
 
 interface EligibleUser {
@@ -1060,6 +1061,11 @@ export default function OrgPartnerAdmin() {
   const [eligible, setEligible] = useState<EligibleUser[]>([]);
   const [learners, setLearners] = useState<Learner[]>([]);
 
+  // Teacher role detection
+  const [isTeacher, setIsTeacher]               = useState(false);
+  const [teacherGroupIds, setTeacherGroupIds]   = useState<string[]>([]);
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -1099,23 +1105,52 @@ export default function OrgPartnerAdmin() {
   const [newGroupSeats, setNewGroupSeats] = useState(20);
   const [newGroupScheduleNote, setNewGroupScheduleNote] = useState("");
   const [newGroupDays, setNewGroupDays] = useState<Record<DayKey, DayConfig>>(makeDefaultDayConfigs());
+  const [newGroupTeacherEmail, setNewGroupTeacherEmail] = useState("");
+
+  // Multi-teacher management
+  const [newTeacherEmailInput, setNewTeacherEmailInput] = useState("");
+  const [teacherEmailAdding, setTeacherEmailAdding] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const me = await account.get();
+        const emailLower = me.email.toLowerCase();
+
         const userRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
-          Query.equal("email", me.email.toLowerCase()),
+          Query.equal("email", emailLower),
           Query.limit(1),
         ]);
         if (!userRes.documents.length) throw new Error("User record not found.");
         const doc = userRes.documents[0] as any;
-        if (doc.role !== "partner_org_admin") throw new Error("Access denied.");
-        if (!doc.partnerName) throw new Error("No partnerName assigned to this account.");
-        setAdminName(doc.name || me.name || "Partner Admin");
-        setPartnerName(doc.partnerName);
-        setContractSeats(safeNumber(doc.contractSeats ?? doc.seatLimit ?? doc.partnerSeats ?? 0));
-        setOrgUserId(doc.$id || me.$id);
+
+        if (doc.role === "partner_org_admin") {
+          // ── Org Admin path ──
+          if (!doc.partnerName) throw new Error("No partnerName assigned to this account.");
+          setAdminName(doc.name || me.name || "Partner Admin");
+          setCurrentUserEmail(emailLower);
+          setPartnerName(doc.partnerName);
+          setContractSeats(safeNumber(doc.contractSeats ?? doc.seatLimit ?? doc.partnerSeats ?? 0));
+          setOrgUserId(doc.$id || me.$id);
+        } else {
+          // ── Teacher path: load all groups and check comma-separated teacherEmail ──
+          const allGroupsRes = await databases.listDocuments(DATABASE_ID, PARTNER_GROUPS_COLLECTION_ID, [
+            Query.limit(500),
+          ]);
+          const groupDoc = allGroupsRes.documents.find((g: any) => {
+            return (g.teacherEmail || "")
+              .split(",")
+              .map((e: string) => e.trim().toLowerCase())
+              .includes(emailLower);
+          }) as any;
+          if (!groupDoc) throw new Error("Access denied.");
+          if (!groupDoc.partnerName) throw new Error("Group has no partnerName.");
+          setAdminName(doc.name || me.name || "Teacher");
+          setCurrentUserEmail(emailLower);
+          setPartnerName(groupDoc.partnerName);
+          setContractSeats(0);
+          setOrgUserId(doc.$id || me.$id);
+        }
       } catch (e: any) {
         setAuthErr(e?.message || "Unauthorized");
       } finally {
@@ -1123,6 +1158,17 @@ export default function OrgPartnerAdmin() {
       }
     })();
   }, []);
+
+  // Detect teacher role from groups — supports multiple group assignments
+  useEffect(() => {
+    if (!currentUserEmail || !groups.length) return;
+    const matched = groups.filter((g) => getGroupTeacherList(g).includes(currentUserEmail));
+    if (matched.length > 0) {
+      setIsTeacher(true);
+      setTeacherGroupIds(matched.map((g) => g.$id));
+      setPage((prev) => (prev === "contract" ? "dashboard" : prev));
+    }
+  }, [currentUserEmail, groups]);
 
   const loadGroups = useCallback(async () => {
     if (!partnerName) return;
@@ -1145,7 +1191,8 @@ export default function OrgPartnerAdmin() {
   const loadLearners = useCallback(async () => {
     if (!partnerName) return;
 
-    const claimedEligible = eligible.filter((u) => u.status === "claimed" && u.email);
+    // Include "inactive" users too so name/activity data is available in the eligible table
+    const claimedEligible = eligible.filter((u) => (u.status === "claimed" || u.status === "inactive") && u.email);
     const claimedEmails = Array.from(
       new Set(
         claimedEligible
@@ -1286,6 +1333,7 @@ export default function OrgPartnerAdmin() {
     setNewGroupSeats(20);
     setNewGroupScheduleNote("");
     setNewGroupDays(makeDefaultDayConfigs());
+    setNewGroupTeacherEmail("");
     setFormErr("");
   };
 
@@ -1295,8 +1343,55 @@ export default function OrgPartnerAdmin() {
     setAddEmail("");
     setAddBulk("");
     setAddName("");
-    setAddGroupId(presetGroupId);
+    // Teachers: if only one group auto-select it, otherwise let them pick from their groups
+    setAddGroupId(isTeacher
+      ? (teacherGroupIds.length === 1 ? teacherGroupIds[0] : presetGroupId)
+      : presetGroupId);
     setFormErr("");
+  };
+
+  // Parse comma-separated teacherEmail field into a list
+  const getGroupTeacherList = (group: Group): string[] => {
+    return (group.teacherEmail || "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+  };
+
+  const handleAddTeacher = async (group: Group) => {
+    const email = newTeacherEmailInput.trim().toLowerCase();
+    if (!email || !emailRegex.test(email)) { showToast("Enter a valid email.", false); return; }
+    const current = getGroupTeacherList(group);
+    if (current.includes(email)) { showToast("Already assigned to this group.", false); return; }
+    setTeacherEmailAdding(true);
+    try {
+      const newList = [...current, email];
+      await databases.updateDocument(DATABASE_ID, PARTNER_GROUPS_COLLECTION_ID, group.$id, {
+        teacherEmail: newList.join(","),
+        updatedAt: new Date().toISOString(),
+      });
+      await loadGroups();
+      setNewTeacherEmailInput("");
+      showToast(`Teacher ${email} added.`);
+    } catch (e: any) {
+      showToast(e?.message || "Failed to add teacher.", false);
+    } finally {
+      setTeacherEmailAdding(false);
+    }
+  };
+
+  const handleRemoveTeacher = async (group: Group, emailToRemove: string) => {
+    const newList = getGroupTeacherList(group).filter((e) => e !== emailToRemove.toLowerCase());
+    try {
+      await databases.updateDocument(DATABASE_ID, PARTNER_GROUPS_COLLECTION_ID, group.$id, {
+        teacherEmail: newList.join(",") || null,
+        updatedAt: new Date().toISOString(),
+      });
+      await loadGroups();
+      showToast(`Teacher ${emailToRemove} removed.`);
+    } catch (e: any) {
+      showToast(e?.message || "Failed to remove teacher.", false);
+    }
   };
 
   const handleCreateGroup = async () => {
@@ -1323,6 +1418,7 @@ export default function OrgPartnerAdmin() {
         color: newGroupColor,
         seats: newGroupSeats,
         schedule,
+        teacherEmail: newGroupTeacherEmail.trim().toLowerCase() || null,
         updatedAt: new Date().toISOString(),
       });
       await loadGroups();
@@ -1488,7 +1584,7 @@ export default function OrgPartnerAdmin() {
     try {
       await databases.updateDocument(DATABASE_ID, PARTNER_ELIGIBILITY_COLLECTION_ID, u.$id, {
         status: "inactive",
-        groupName: null,
+        // groupName is intentionally kept so teachers can still see and reactivate
         updatedAt: new Date().toISOString(),
       });
       const learnerRes = await databases.listDocuments(DATABASE_ID, USERS_COLLECTION_ID, [
@@ -1726,6 +1822,7 @@ export default function OrgPartnerAdmin() {
   }, [btnOutline, btnPrimary, openContractPdfWindow]);
 
   const openPage = (next: Page) => {
+    if (isTeacher && next === "contract") return;
     setPage(next);
     setSearch("");
     setStatusFilter("all");
@@ -1735,24 +1832,58 @@ export default function OrgPartnerAdmin() {
     if (next !== "eligible") setSelectedEligible(null);
   };
 
-  const activeEligibleCount = useMemo(() => eligible.filter((u) => u.status !== "inactive").length, [eligible]);
+  // Teacher-scoped resolved groups (array — teacher may be in multiple groups)
+  const teacherGroups = useMemo(
+    () => groups.filter((g) => teacherGroupIds.includes(g.$id)),
+    [groups, teacherGroupIds]
+  );
+  // Singular convenience (first group, used for locked-display UI in add modal etc.)
+  const teacherGroup = teacherGroups[0] ?? null;
+  const teacherGroupNames = useMemo(
+    () => new Set(teacherGroups.map((g) => g.name)),
+    [teacherGroups]
+  );
+
+  // Visible subsets — full data for admins, teacher's groups only for teachers
+  const visibleGroups = useMemo(
+    () => (isTeacher ? groups.filter((g) => teacherGroupIds.includes(g.$id)) : groups),
+    [groups, isTeacher, teacherGroupIds]
+  );
+
+  const visibleEligible = useMemo(
+    () =>
+      isTeacher && teacherGroups.length
+        ? eligible.filter((u) => teacherGroupNames.has(u.groupName ?? ""))
+        : eligible,
+    [eligible, isTeacher, teacherGroups, teacherGroupNames]
+  );
+
+  const visibleLearners = useMemo(
+    () =>
+      isTeacher && teacherGroups.length
+        ? learners.filter((u) => teacherGroupNames.has(u.groupName ?? ""))
+        : learners,
+    [learners, isTeacher, teacherGroups, teacherGroupNames]
+  );
+
+  const activeEligibleCount = useMemo(() => visibleEligible.filter((u) => u.status !== "inactive").length, [visibleEligible]);
 
   const stats = useMemo(() => {
-    const activeThisWeek = learners.filter((u) => {
+    const activeThisWeek = visibleLearners.filter((u) => {
       const d = daysAgo(u.lastLoginAt);
       return d !== null && d <= 6;
     }).length;
 
-    const lessActive = learners.filter((u) => {
+    const lessActive = visibleLearners.filter((u) => {
       const d = daysAgo(u.lastLoginAt);
       return d !== null && d >= 7;
     }).length;
 
-    const totalSessions = learners.reduce((sum, u) => sum + safeNumber(u.sessionCountMonth), 0);
-    const avgSessions = learners.length ? Number((totalSessions / learners.length).toFixed(1)) : 0;
-    const reservedSeats = groups.reduce((sum, g) => sum + safeNumber(g.seats), 0);
+    const totalSessions = visibleLearners.reduce((sum, u) => sum + safeNumber(u.sessionCountMonth), 0);
+    const avgSessions = visibleLearners.length ? Number((totalSessions / visibleLearners.length).toFixed(1)) : 0;
+    const reservedSeats = visibleGroups.reduce((sum, g) => sum + safeNumber(g.seats), 0);
     const availableSeats = Math.max(contractSeats - reservedSeats, 0);
-    const activeClaimedSeats = eligible.filter((u) => u.status === "claimed").length;
+    const activeClaimedSeats = visibleEligible.filter((u) => u.status === "claimed").length;
     const seatUtilization = contractSeats ? Math.round((reservedSeats / contractSeats) * 100) : 0;
 
     return {
@@ -1765,12 +1896,12 @@ export default function OrgPartnerAdmin() {
       activeClaimedSeats,
       seatUtilization,
     };
-  }, [contractSeats, eligible, groups, learners]);
+  }, [contractSeats, visibleEligible, visibleGroups, visibleLearners]);
 
   const groupCards = useMemo(() => {
-    return groups.map((g) => {
-      const members = eligible.filter((u) => u.groupName === g.name && u.status !== "inactive");
-      const learnerRows = learners.filter((u) => u.groupName === g.name);
+    return visibleGroups.map((g) => {
+      const members = visibleEligible.filter((u) => u.groupName === g.name && u.status !== "inactive");
+      const learnerRows = visibleLearners.filter((u) => u.groupName === g.name);
       const activeThisWeek = learnerRows.filter((u) => {
         const d = daysAgo(u.lastLoginAt);
         return d !== null && d <= 6;
@@ -1783,7 +1914,7 @@ export default function OrgPartnerAdmin() {
       const pct = g.seats ? Math.min(100, Math.round((members.length / g.seats) * 100)) : 0;
       return { group: g, members, learnerRows, activeThisWeek, lessActive, totalSessions, pct };
     });
-  }, [eligible, groups, learners]);
+  }, [visibleEligible, visibleGroups, visibleLearners]);
 
   const selectedGroupCard = useMemo(() => {
     if (!selectedGroup) return null;
@@ -1791,13 +1922,13 @@ export default function OrgPartnerAdmin() {
   }, [groupCards, selectedGroup]);
 
   const sortedLearners = useMemo(() => {
-    return [...learners].sort((a, b) => (daysAgo(a.lastLoginAt) ?? 999) - (daysAgo(b.lastLoginAt) ?? 999));
-  }, [learners]);
+    return [...visibleLearners].sort((a, b) => (daysAgo(a.lastLoginAt) ?? 999) - (daysAgo(b.lastLoginAt) ?? 999));
+  }, [visibleLearners]);
 
   const attentionLearners = useMemo(() => sortedLearners.filter((u) => (daysAgo(u.lastLoginAt) ?? -1) >= 7).slice(0, 6), [sortedLearners]);
 
   const filteredLearners = useMemo(() => {
-    return learners.filter((u) => {
+    return visibleLearners.filter((u) => {
       const query = search.trim().toLowerCase();
       if (query) {
         const name = (u.name || "").toLowerCase();
@@ -1814,15 +1945,15 @@ export default function OrgPartnerAdmin() {
       }
       if (groupFilter !== "all") {
         if (groupFilter === "none") return !u.groupName;
-        const g = groups.find((x) => x.$id === groupFilter);
+        const g = visibleGroups.find((x) => x.$id === groupFilter);
         if (g && u.groupName !== g.name) return false;
       }
       return true;
     });
-  }, [groups, groupFilter, learners, search, statusFilter]);
+  }, [visibleGroups, groupFilter, visibleLearners, search, statusFilter]);
 
   const filteredEligible = useMemo(() => {
-    return eligible.filter((u) => {
+    return visibleEligible.filter((u) => {
       const query = search.trim().toLowerCase();
       if (query) {
         const name = (u.name || "").toLowerCase();
@@ -1832,12 +1963,12 @@ export default function OrgPartnerAdmin() {
       if (statusFilter !== "all" && u.status !== statusFilter) return false;
       if (groupFilter !== "all") {
         if (groupFilter === "none") return !u.groupName;
-        const fg = groups.find((g) => g.$id === groupFilter);
+        const fg = visibleGroups.find((g) => g.$id === groupFilter);
         return fg ? u.groupName === fg.name : false;
       }
       return true;
     });
-  }, [eligible, groupFilter, search, statusFilter]);
+  }, [visibleEligible, groupFilter, search, statusFilter]);
 
   const selectedEligibleRegisteredUser = useMemo(() => {
     if (!selectedEligible) return null;
@@ -1907,20 +2038,20 @@ export default function OrgPartnerAdmin() {
     return selectedLearnerSessions.filter((s: any) => s.date >= start).reduce((sum: number, s: any) => sum + Math.round((Number(s.durationSeconds) || 0) / 60), 0);
   }, [selectedLearnerSessions]);
   const cohortAvgMinutes = useMemo(() => {
-    const vals = learners.map((u) => safeNumber(u.sessionCountMonth));
+    const vals = visibleLearners.map((u) => safeNumber(u.sessionCountMonth));
     return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
-  }, [learners]);
+  }, [visibleLearners]);
   const ringCirc = useMemo(() => 2 * Math.PI * 32, []);
   const ringOffset = useMemo(() => ringCirc * (1 - Math.min(selectedTodaySessionCount / DAILY_GOAL, 1)), [ringCirc, selectedTodaySessionCount]);
 
   const cohortMaxMonthlySessions = useMemo(
-    () => learners.reduce((max, u) => Math.max(max, safeNumber(u.sessionCountMonth)), 0),
-    [learners]
+    () => visibleLearners.reduce((max, u) => Math.max(max, safeNumber(u.sessionCountMonth)), 0),
+    [visibleLearners]
   );
 
   const cohortAvgMonthlySessions = useMemo(
-    () => (learners.length ? Number((learners.reduce((sum, u) => sum + safeNumber(u.sessionCountMonth), 0) / learners.length).toFixed(1)) : 0),
-    [learners]
+    () => (visibleLearners.length ? Number((visibleLearners.reduce((sum, u) => sum + safeNumber(u.sessionCountMonth), 0) / visibleLearners.length).toFixed(1)) : 0),
+    [visibleLearners]
   );
 
   const selectedDays = useMemo(() => DAYS.filter((day) => newGroupDays[day].enabled), [newGroupDays]);
@@ -2031,25 +2162,29 @@ export default function OrgPartnerAdmin() {
             Eligible Users
           </button>
 
-          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: 0.3, padding: "16px 8px 8px" }}>CONTRACT</div>
-          <button
-            onClick={() => openPage("contract")}
-            className="opa-nav"
-            style={{
-              width: "100%", display: "flex", alignItems: "center", gap: 10,
-              border: "none",
-              background: page === "contract" ? "rgba(74,124,243,.22)" : "transparent",
-              color: page === "contract" ? "#beddff" : "rgba(255,255,255,.62)",
-              borderRadius: 12, padding: "11px 12px", fontSize: 14, fontWeight: 700,
-              fontFamily: "inherit", cursor: "pointer", textAlign: "left", position: "relative",
-            }}
-          >
-            <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><FileCheck size={16} /></span>
-            Contract
-            {contract?.status === "pending_org" && (
-              <span style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
-            )}
-          </button>
+          {!isTeacher && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", opacity: 0.3, padding: "16px 8px 8px" }}>CONTRACT</div>
+              <button
+                onClick={() => openPage("contract")}
+                className="opa-nav"
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  border: "none",
+                  background: page === "contract" ? "rgba(74,124,243,.22)" : "transparent",
+                  color: page === "contract" ? "#beddff" : "rgba(255,255,255,.62)",
+                  borderRadius: 12, padding: "11px 12px", fontSize: 14, fontWeight: 700,
+                  fontFamily: "inherit", cursor: "pointer", textAlign: "left", position: "relative",
+                }}
+              >
+                <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><FileCheck size={16} /></span>
+                Contract
+                {contract?.status === "pending_org" && (
+                  <span style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+                )}
+              </button>
+            </>
+          )}
 
           {/* TEMPORARILY HIDDEN — Export Reports nav
           <div style={{ fontSize: 10, ... }}>REPORTS</div>
@@ -2062,7 +2197,7 @@ export default function OrgPartnerAdmin() {
             <div style={{ width: 34, height: 34, borderRadius: 999, background: S.blue, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900 }}>{initials(adminName)}</div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,.92)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adminName}</div>
-              <div style={{ fontSize: 11, opacity: 0.42 }}>Partner Admin</div>
+              <div style={{ fontSize: 11, opacity: 0.42 }}>{isTeacher ? "Teacher" : "Partner Admin"}</div>
             </div>
           </div>
           <button onClick={() => { setPwErr(""); setPwCurrent(""); setPwNew(""); setPwConfirm(""); setShowChangePassword(true); }} className="opa-nav" style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, border: "none", background: "transparent", color: "rgba(255,255,255,.5)", borderRadius: 12, padding: "9px 12px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left" }}>
@@ -2095,8 +2230,8 @@ export default function OrgPartnerAdmin() {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button onClick={refreshAll} style={btnOutline}><RefreshCw size={15} /> Refresh</button>
-            {(page === "eligible" || page === "dashboard") && <button onClick={() => fileInputRef.current?.click()} style={btnOutline}><Upload size={15} /> Import CSV</button>}
-            {page === "groups" && !selectedGroup && <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} style={btnPrimary}><Plus size={15} /> New Group</button>}
+            {!isTeacher && (page === "eligible" || page === "dashboard") && <button onClick={() => fileInputRef.current?.click()} style={btnOutline}><Upload size={15} /> Import CSV</button>}
+            {!isTeacher && page === "groups" && !selectedGroup && <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} style={btnPrimary}><Plus size={15} /> New Group</button>}
             {page === "groups" && selectedGroup && <button onClick={() => openAddModal(selectedGroup.$id)} style={btnPrimary}><Plus size={15} /> Add Learners</button>}
             {page === "learners" && <button onClick={() => openAddModal(selectedLearner?.groupName ? groups.find((g) => g.name === selectedLearner.groupName)?.$id || null : null)} style={btnPrimary}><Plus size={15} /> Add Learner</button>}
             {page === "eligible" && <button onClick={() => openAddModal(null)} style={btnPrimary}><Plus size={15} /> Add Email</button>}
@@ -2175,13 +2310,15 @@ export default function OrgPartnerAdmin() {
                                   <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 900, color: group.color }}>{members.length}/{group.seats}</div>
                                   <div style={{ fontSize: 10, color: S.textSoft, fontWeight: 700 }}>seats used</div>
                                 </div>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }}
-                                  style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "#fee2e2", color: S.red, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 2 }}
-                                  title="Delete group"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+                                {!isTeacher && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setGroupToDelete(group); }}
+                                    style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "#fee2e2", color: S.red, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 2 }}
+                                    title="Delete group"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
                               </div>
                             </div>
                             <div style={{ fontFamily: titleFont, fontSize: 16, fontWeight: 800 }}>{group.name}</div>
@@ -2291,7 +2428,7 @@ export default function OrgPartnerAdmin() {
             <>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 14 }}>
                 {[
-                  { label: "Total Groups", value: groups.length, color: S.blue },
+                  { label: "Total Groups", value: visibleGroups.length, color: S.blue },
                   { label: "Total Learners", value: activeEligibleCount, color: S.violet },
                   { label: "Active This Week", value: stats.activeThisWeek, color: S.green },
                   { label: "Less Active", value: stats.lessActive, color: S.red },
@@ -2339,13 +2476,15 @@ export default function OrgPartnerAdmin() {
                   </button>
                 ))}
 
-                <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} className="opa-hover-card" style={{ ...shellCard, border: `1.5px dashed ${S.border}`, padding: 20, minHeight: 244, display: "grid", placeItems: "center", textAlign: "center", cursor: "pointer", fontFamily: "inherit" }}>
-                  <div>
-                    <div style={{ fontSize: 42, color: S.textFaint, lineHeight: 1, marginBottom: 10 }}>＋</div>
-                    <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Create New Group</div>
-                    <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.6, maxWidth: 220 }}>Organize learners into morning class, evening class, online, or custom groups.</div>
-                  </div>
-                </button>
+                {!isTeacher && (
+                  <button onClick={() => { setShowCreateGroup(true); setFormErr(""); }} className="opa-hover-card" style={{ ...shellCard, border: `1.5px dashed ${S.border}`, padding: 20, minHeight: 244, display: "grid", placeItems: "center", textAlign: "center", cursor: "pointer", fontFamily: "inherit" }}>
+                    <div>
+                      <div style={{ fontSize: 42, color: S.textFaint, lineHeight: 1, marginBottom: 10 }}>＋</div>
+                      <div style={{ fontFamily: titleFont, fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Create New Group</div>
+                      <div style={{ fontSize: 13, color: S.textSoft, lineHeight: 1.6, maxWidth: 220 }}>Organize learners into morning class, evening class, online, or custom groups.</div>
+                    </div>
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -2367,7 +2506,7 @@ export default function OrgPartnerAdmin() {
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <button onClick={() => openAddModal(selectedGroupCard.group.$id)} style={{ ...btnOutline, background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.18)" }}><Plus size={15} /> Add Learners</button>
-                    <button onClick={() => setGroupToDelete(selectedGroupCard.group)} style={{ ...btnOutline, background: "rgba(239,68,68,.15)", color: "#fca5a5", border: "1px solid rgba(239,68,68,.25)" }}><Trash2 size={15} /> Delete Group</button>
+                    {!isTeacher && <button onClick={() => setGroupToDelete(selectedGroupCard.group)} style={{ ...btnOutline, background: "rgba(239,68,68,.15)", color: "#fca5a5", border: "1px solid rgba(239,68,68,.25)" }}><Trash2 size={15} /> Delete Group</button>}
                   </div>
                 </div>
               </div>
@@ -2385,6 +2524,66 @@ export default function OrgPartnerAdmin() {
                   </div>
                 ))}
               </div>
+
+              {!isTeacher && (() => {
+                const currentTeachers = getGroupTeacherList(selectedGroupCard.group);
+                return (
+                  <div style={{ ...shellCard, padding: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ fontFamily: titleFont, fontSize: 14, fontWeight: 800 }}>Teachers</div>
+                      {currentTeachers.length > 0 && (
+                        <span style={{ fontSize: 11, fontWeight: 800, color: S.textSoft, background: S.bg, padding: "3px 10px", borderRadius: 999 }}>
+                          {currentTeachers.length} assigned
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: S.textSoft, marginBottom: 14 }}>
+                      Each teacher can log in and see only this group's data. Add as many as needed.
+                    </div>
+
+                    {currentTeachers.length > 0 && (
+                      <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+                        {currentTeachers.map((teacherEmail) => (
+                          <div key={teacherEmail} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, background: S.greenSoft, border: "1px solid #bbf7d0" }}>
+                            <UserPlus size={14} color="#1b8d4b" style={{ flexShrink: 0 }} />
+                            <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#1b8d4b", wordBreak: "break-all" }}>{teacherEmail}</span>
+                            <button
+                              onClick={() => handleRemoveTeacher(selectedGroupCard.group, teacherEmail)}
+                              style={{ border: `1px solid ${S.red}`, background: S.redSoft, color: S.red, borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {currentTeachers.length === 0 && (
+                      <div style={{ padding: "12px 14px", borderRadius: 12, background: S.bg, border: `1px dashed ${S.border}`, fontSize: 12, color: S.textSoft, marginBottom: 14 }}>
+                        No teachers assigned yet. Add one below.
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input
+                        value={newTeacherEmailInput}
+                        onChange={(e) => setNewTeacherEmailInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleAddTeacher(selectedGroupCard.group); }}
+                        type="email"
+                        placeholder="teacher@example.com"
+                        style={{ ...inputStyle, flex: 1 }}
+                      />
+                      <button
+                        onClick={() => handleAddTeacher(selectedGroupCard.group)}
+                        disabled={teacherEmailAdding || !newTeacherEmailInput.trim()}
+                        style={{ ...btnPrimary, opacity: (teacherEmailAdding || !newTeacherEmailInput.trim()) ? 0.7 : 1, whiteSpace: "nowrap" }}
+                      >
+                        {teacherEmailAdding ? "Adding…" : "+ Add Teacher"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{ ...shellCard, padding: 20 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -2454,11 +2653,23 @@ export default function OrgPartnerAdmin() {
                       <button key={value} onClick={() => setStatusFilter(value)} style={{ height: 34, borderRadius: 10, border: "none", background: statusFilter === value ? S.violetSoft : "transparent", color: statusFilter === value ? S.indigo : S.textSoft, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>{label}</button>
                     ))}
                   </div>
-                  <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} style={{ ...inputStyle, marginTop: 10, cursor: "pointer" }}>
-                    <option value="all">All groups</option>
-                    {groups.map((g) => <option key={g.$id} value={g.$id}>{g.name}</option>)}
-                    <option value="none">No group</option>
-                  </select>
+                  {!isTeacher && (
+                    <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} style={{ ...inputStyle, marginTop: 10, cursor: "pointer" }}>
+                      <option value="all">All groups</option>
+                      {visibleGroups.map((g) => <option key={g.$id} value={g.$id}>{g.name}</option>)}
+                      <option value="none">No group</option>
+                    </select>
+                  )}
+                  {isTeacher && teacherGroups.length > 0 && (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {teacherGroups.map((tg) => (
+                        <div key={tg.$id} style={{ ...inputStyle, display: "flex", alignItems: "center", gap: 8, background: S.bg, color: S.textSoft, fontSize: 13, cursor: "default" }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: tg.color, flexShrink: 0, display: "inline-block" }} />
+                          {tg.name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="opa-scroll" style={{ overflow: "auto", flex: 1 }}>
@@ -2750,7 +2961,7 @@ export default function OrgPartnerAdmin() {
                     </select>
                     <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} style={{ ...inputStyle, width: 170, cursor: "pointer" }}>
                       <option value="all">All groups</option>
-                      {groups.map((g) => <option key={g.$id} value={g.$id}>{g.name}</option>)}
+                      {visibleGroups.map((g) => <option key={g.$id} value={g.$id}>{g.name}</option>)}
                       <option value="none">No group</option>
                     </select>
                   </div>
@@ -2782,9 +2993,11 @@ export default function OrgPartnerAdmin() {
                             </td>
                             <td style={{ padding: "12px 14px" }}>
                               {group ? (
-                                <button onClick={() => { setShowAssign(u); setAssignGroupId(groups.find((g) => g.name === u.groupName)?.$id || null); }} style={{ border: `1px solid ${group.color}33`, background: `${group.color}18`, color: group.color, borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{group.emoji} {group.name}</button>
+                                isTeacher
+                                  ? <span style={{ border: `1px solid ${group.color}33`, background: `${group.color}18`, color: group.color, borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 800 }}>{group.emoji} {group.name}</span>
+                                  : <button onClick={() => { setShowAssign(u); setAssignGroupId(groups.find((g) => g.name === u.groupName)?.$id || null); }} style={{ border: `1px solid ${group.color}33`, background: `${group.color}18`, color: group.color, borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{group.emoji} {group.name}</button>
                               ) : (
-                                <button onClick={() => { setShowAssign(u); setAssignGroupId(null); }} style={{ border: "none", background: "transparent", color: S.blue, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>+ Assign group</button>
+                                !isTeacher ? <button onClick={() => { setShowAssign(u); setAssignGroupId(null); }} style={{ border: "none", background: "transparent", color: S.blue, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>+ Assign group</button> : null
                               )}
                             </td>
                             <td style={{ padding: "12px 14px", color: S.textSoft }}>{fmtDate(u.addedAt)}</td>
@@ -2831,7 +3044,7 @@ export default function OrgPartnerAdmin() {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button onClick={() => { setShowAssign(selectedEligible); setAssignGroupId(groups.find((g) => g.name === selectedEligible.groupName)?.$id || null); }} style={{ ...btnOutline, background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.18)" }}>Assign group</button>
+                    {!isTeacher && <button onClick={() => { setShowAssign(selectedEligible); setAssignGroupId(groups.find((g) => g.name === selectedEligible.groupName)?.$id || null); }} style={{ ...btnOutline, background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.18)" }}>Assign group</button>}
                     {selectedEligible.status !== "inactive" ? (
                       <button onClick={() => handleDeactivate(selectedEligible)} style={{ ...btnOutline, background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.18)" }}>Deactivate</button>
                     ) : (
@@ -3305,6 +3518,23 @@ export default function OrgPartnerAdmin() {
                 </div>
               </div>
 
+              <div>
+                <label style={labelStyle}>
+                  Teacher Email
+                  <span style={{ color: S.textSoft, fontWeight: 600 }}> — optional, grants teacher access to this group</span>
+                </label>
+                <input
+                  value={newGroupTeacherEmail}
+                  onChange={(e) => setNewGroupTeacherEmail(e.target.value)}
+                  type="email"
+                  placeholder="teacher@example.com"
+                  style={inputStyle}
+                />
+                <div style={{ fontSize: 11, color: S.textSoft, marginTop: 6, lineHeight: 1.6 }}>
+                  The teacher must also have an account with <code>role: partner_org_admin</code> and <code>partnerName: {partnerName}</code> in the users collection.
+                </div>
+              </div>
+
               {formErr && <div style={{ padding: "10px 12px", borderRadius: 12, background: S.redSoft, color: S.red, fontSize: 12, fontWeight: 700 }}>{formErr}</div>}
             </div>
 
@@ -3351,23 +3581,45 @@ export default function OrgPartnerAdmin() {
 
               <div>
                 <label style={labelStyle}>Assign to group</label>
-                <div style={{ display: "grid", gap: 8 }}>
-                  {[{ $id: "none", name: "No group", emoji: "➖", color: "#94a3b8", schedule: "Assign later", seats: 0 } as unknown as Group, ...groups].map((g) => {
-                    const targetId = g.$id === "none" ? null : g.$id;
-                    const active = addGroupId === targetId;
-                    const count = g.$id === "none" ? 0 : eligible.filter((u) => u.groupName === g.name && u.status !== "inactive").length;
-                    return (
-                      <button key={g.$id} onClick={() => setAddGroupId(targetId)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 14, border: `1px solid ${active ? S.blue : S.border}`, background: active ? S.blueSoft : "#fff", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 12, background: g.$id === "none" ? "#f3f5f9" : `${g.color}18`, color: g.$id === "none" ? S.textSoft : g.color, display: "grid", placeItems: "center", fontSize: 22 }}>{g.emoji}</div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 14, fontWeight: 800 }}>{g.name}</div>
-                          <div style={{ fontSize: 12, color: S.textSoft }}>{g.$id === "none" ? "Assign later" : `${count}/${g.seats} seats • ${g.schedule}`}</div>
-                        </div>
-                        {active && <div style={{ color: S.blue, fontWeight: 900 }}>✓</div>}
-                      </button>
-                    );
-                  })}
-                </div>
+                {isTeacher && teacherGroups.length > 0 ? (
+                  // Teacher: can only pick from their assigned groups
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {teacherGroups.map((tg) => {
+                      const active = addGroupId === tg.$id;
+                      const count = visibleEligible.filter((u) => u.groupName === tg.name && u.status !== "inactive").length;
+                      return (
+                        <button key={tg.$id} onClick={() => setAddGroupId(tg.$id)}
+                          style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 14, border: `1px solid ${active ? tg.color : S.border}`, background: active ? `${tg.color}0d` : "#fff", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                          <div style={{ width: 40, height: 40, borderRadius: 12, background: `${tg.color}18`, color: tg.color, display: "grid", placeItems: "center", fontSize: 22 }}>{tg.emoji}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800 }}>{tg.name}</div>
+                            <div style={{ fontSize: 12, color: S.textSoft }}>{count}/{tg.seats} seats • {tg.schedule}</div>
+                          </div>
+                          {active && <div style={{ color: tg.color, fontWeight: 900 }}>✓</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  // Admin: full group picker
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {[{ $id: "none", name: "No group", emoji: "➖", color: "#94a3b8", schedule: "Assign later", seats: 0 } as unknown as Group, ...groups].map((g) => {
+                      const targetId = g.$id === "none" ? null : g.$id;
+                      const active = addGroupId === targetId;
+                      const count = g.$id === "none" ? 0 : eligible.filter((u) => u.groupName === g.name && u.status !== "inactive").length;
+                      return (
+                        <button key={g.$id} onClick={() => setAddGroupId(targetId)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 14, border: `1px solid ${active ? S.blue : S.border}`, background: active ? S.blueSoft : "#fff", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                          <div style={{ width: 40, height: 40, borderRadius: 12, background: g.$id === "none" ? "#f3f5f9" : `${g.color}18`, color: g.$id === "none" ? S.textSoft : g.color, display: "grid", placeItems: "center", fontSize: 22 }}>{g.emoji}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800 }}>{g.name}</div>
+                            <div style={{ fontSize: 12, color: S.textSoft }}>{g.$id === "none" ? "Assign later" : `${count}/${g.seats} seats • ${g.schedule}`}</div>
+                          </div>
+                          {active && <div style={{ color: S.blue, fontWeight: 900 }}>✓</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {formErr && <div style={{ padding: "10px 12px", borderRadius: 12, background: S.redSoft, color: S.red, fontSize: 12, fontWeight: 700 }}>{formErr}</div>}
@@ -3384,7 +3636,7 @@ export default function OrgPartnerAdmin() {
         </div>
       )}
 
-      {showAssign && (
+      {showAssign && !isTeacher && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,18,33,.38)", display: "grid", placeItems: "center", padding: 20, zIndex: 230 }}>
           <div style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: 24, border: `1px solid ${S.border}`, boxShadow: "0 30px 70px rgba(10,18,33,.22)", overflow: "hidden" }}>
             <div style={{ padding: "22px 22px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${S.border}` }}>

@@ -162,7 +162,7 @@ export default function Login() {
     });
   };
 
-  // ✅ route based on role in DB
+  // ✅ route based on role in DB (teachers detected via partner_groups)
   const routeByRole = async (emailForLookup: string) => {
     const e = emailForLookup.trim().toLowerCase();
 
@@ -171,13 +171,33 @@ export default function Login() {
     ]);
 
     const role = res.documents.length ? (res.documents[0] as any).role : "user";
-    nav(
-  role === "admin"            ? "/admin" :
-  role === "partner_admin"    ? "/partner-admin" :
-  role === "partner_org_admin"? "/org-partner-admin" :
-  "/userhome",
-  { replace: true }
-);
+
+    if (role === "admin")             { nav("/admin",            { replace: true }); return; }
+    if (role === "partner_admin")     { nav("/partner-admin",    { replace: true }); return; }
+    if (role === "partner_org_admin") { nav("/org-partner-admin",{ replace: true }); return; }
+
+    // Check if this email is a teacher on any group (comma-separated teacherEmail field)
+    try {
+      const PARTNER_GROUPS_COLLECTION_ID =
+        ((import.meta as any).env?.VITE_PARTNER_GROUPS_COLLECTION_ID || "partner_groups").trim();
+      const allGroups = await databases.listDocuments(DATABASE_ID, PARTNER_GROUPS_COLLECTION_ID, [
+        Query.limit(500),
+      ]);
+      const isTeacher = allGroups.documents.some((g: any) =>
+        (g.teacherEmail || "")
+          .split(",")
+          .map((x: string) => x.trim().toLowerCase())
+          .includes(e)
+      );
+      if (isTeacher) {
+        nav("/org-partner-admin", { replace: true });
+        return;
+      }
+    } catch {
+      // no teacher match — fall through to userhome
+    }
+
+    nav("/userhome", { replace: true });
   };
 
 const redirectAfterAuth = async (emailForLookup: string) => {
